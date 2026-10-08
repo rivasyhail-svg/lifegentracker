@@ -1,0 +1,27 @@
+# Fly.io — `fly launch --copy-config --no-deploy` then `fly volumes create lifegen_data --size 1 --region sin` then `fly deploy`.
+app = "lifegentracker"
+primary_region = "sin"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  LIFEGEN_AUTH = "on"
+  LIFEGEN_DATA_DIR = "/data"
+  PORT = "3000"
+
+[[mounts]]
+  source = "lifegen_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+[[http_service.checks]]
+  path = "/api/health"
+  interval = "30s"
+  timeout = "5s"

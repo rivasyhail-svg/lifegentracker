@@ -1,0 +1,14 @@
+# Any VPS / PC with Docker:  docker compose up -d   → http://<server-ip>:3000
+services:
+  lifegentracker:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      LIFEGEN_AUTH: "on"
+      LIFEGEN_DATA_DIR: /data
+    volumes:
+      - lifegen_data:/data
+volumes:
+  lifegen_data:

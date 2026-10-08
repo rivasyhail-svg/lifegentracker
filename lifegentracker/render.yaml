@@ -1,0 +1,18 @@
+# Render.com blueprint — "New + → Blueprint" and point it at this repo.
+# Uses a persistent disk so the SQLite database survives deploys/restarts.
+services:
+  - type: web
+    name: lifegentracker
+    runtime: docker
+    plan: starter            # a paid plan is required for a persistent disk (free instances lose files)
+    region: singapore
+    healthCheckPath: /api/health
+    envVars:
+      - key: LIFEGEN_AUTH
+        value: "on"
+      - key: LIFEGEN_DATA_DIR
+        value: /data
+    disk:
+      name: lifegen-data
+      mountPath: /data
+      sizeGB: 1
