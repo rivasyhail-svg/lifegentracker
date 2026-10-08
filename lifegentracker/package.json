@@ -6,6 +6,7 @@
   "private": true,
   "scripts": {
     "start": "node server.js",
+    "vercel-build": "echo skip-build",
     "dev": "node --watch server.js",
     "reset-password": "node scripts/reset-password.js",
     "build:single": "node scripts/build-single.js",
