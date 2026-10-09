@@ -62,7 +62,8 @@ async function request(method, url, body) {
   }
   if (!res.ok) {
     if (res.status === 401) { session.set(null); window.dispatchEvent(new CustomEvent('auth:expired')); }
-    throw new ApiError(res.status, (data && data.error) || `Request failed (${res.status}).`, data && data.details);
+    const msg = (data && data.error) || `Request failed (${res.status}).`;
+    throw new ApiError(res.status, data && data.hint ? `${msg} — ${data.hint}` : msg, data && data.details);
   }
   return data;
 }

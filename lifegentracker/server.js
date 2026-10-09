@@ -24,12 +24,32 @@ const backup = require('./src/services/backup');
 const PORT = Number(process.env.PORT) || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
 
-initDb();
+// Open the database. On a hosted setup (Vercel + Supabase/Turso) a wrong connection string or a paused
+// database must NOT crash the whole function — the API answers 503 with the real reason instead, and
+// /api/health shows it, so the problem can be fixed from the browser without digging through logs.
+let dbInitError = null;
+function tryInitDb() {
+  try { initDb(); dbInitError = null; } catch (e) { dbInitError = e; console.error('[db] startup failed:', e.message); }
+  return !dbInitError;
+}
+tryInitDb();
 if (AUTH_DISABLED) {
   console.warn('[auth] WARNING: LIFEGEN_AUTH=off — sign-in is disabled; everyone who can reach this server is an admin.');
 }
 // Automatic daily database snapshot (data/backups/, last 14 kept).
-backup.scheduleAuto(getDb(), DB_FILE);
+if (!dbInitError) backup.scheduleAuto(getDb(), DB_FILE);
+
+/** Plain-language hint for the most common hosted-database mistakes. */
+function dbHint(err) {
+  const m = String(err && err.message || '');
+  if (/password authentication failed/i.test(m)) return 'Wrong database password in LIFEGEN_DB_URL. Replace [YOUR-PASSWORD] (including the brackets) with the real Supabase database password, save, then Redeploy.';
+  if (/Tenant or user not found/i.test(m)) return 'The user part of LIFEGEN_DB_URL is wrong. Copy the URI again from Supabase → Connect → Session pooler (it looks like postgres.<project-ref>).';
+  if (/ENETUNREACH|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|ECONNREFUSED/i.test(m)) return 'Cannot reach the database host. Use the Supabase “Session pooler” URI (…pooler.supabase.com:5432), not “Direct connection”. If the project is paused, press “Restore project” in Supabase.';
+  if (/EROFS|SQLITE_CANTOPEN|read-only file system|LIFEGEN_DB_URL is not set/i.test(m)) return 'LIFEGEN_DB_URL is missing on this host (no disk for a local file). Add it in Vercel → Settings → Environment Variables, then Redeploy.';
+  if (/Cannot find module/i.test(m)) return 'A dependency is missing from the deployment; make sure package.json is in the root directory and redeploy without build cache.';
+  if (/timed out/i.test(m)) return 'The database did not answer in time. If it is a free Supabase project it may be paused — open the Supabase dashboard and restore it.';
+  return 'Check LIFEGEN_DB_URL in the host’s environment variables and redeploy.';
+}
 
 const app = express();
 app.disable('x-powered-by');
@@ -70,8 +90,18 @@ api.use((req, res, next) => {
   if (req.headers['x-requested-with'] === 'LifegenTracker') return next();
   res.status(403).json({ error: 'Request rejected (missing X-Requested-With header).' });
 });
+api.get('/health', (req, res) => {
+  if (dbInitError && !tryInitDb()) {
+    return res.status(503).json({ ok: false, app: 'LifegenTracker', time: new Date().toISOString(), db: 'error', db_error: dbInitError.message, hint: dbHint(dbInitError) });
+  }
+  res.json({ ok: true, app: 'LifegenTracker', time: new Date().toISOString(), db: 'ok' });
+});
+// Every other API call needs the database; answer clearly instead of crashing while it is unavailable.
+api.use((req, res, next) => {
+  if (!dbInitError || tryInitDb()) return next();
+  res.status(503).json({ error: 'Database connection failed: ' + dbInitError.message, hint: dbHint(dbInitError), db: 'error' });
+});
 api.use(attachUser);
-api.get('/health', (req, res) => res.json({ ok: true, app: 'LifegenTracker', time: new Date().toISOString() }));
 api.use('/public', require('./src/routes/public')); // QR self-registration form (no login, rate-limited)
 api.use('/auth', require('./src/routes/auth'));
 api.use('/people', require('./src/routes/people'));

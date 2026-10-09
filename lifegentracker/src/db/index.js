@@ -37,6 +37,9 @@ function initDb() {
   } else if (REMOTE) {
     db = new Database(DB_URL, { authToken: process.env.LIFEGEN_DB_TOKEN || undefined });
   } else {
+    if (process.env.VERCEL && !process.env.LIFEGEN_DB_FILE) {
+      throw new Error('LIFEGEN_DB_URL is not set — this host has no persistent disk, so a hosted database (Supabase postgresql:// or Turso libsql://) is required.');
+    }
     fs.mkdirSync(path.dirname(DB_FILE), { recursive: true });
     db = new Database(DB_FILE);
     // Rollback journal (not WAL) so every committed write lands in the single

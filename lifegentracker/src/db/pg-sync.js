@@ -8,6 +8,7 @@
  */
 const { Worker, MessageChannel, receiveMessageOnPort } = require('worker_threads');
 const { translate, translateScript } = require('./sqlite-to-pg');
+require('pg'); // static require so serverless bundlers (Vercel/nft) always ship the driver for the worker
 
 const QUERY_TIMEOUT_MS = 25000;
 
