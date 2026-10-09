@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#ffffff" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>Lifegen Registration · LifegenTracker</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/css/styles.css" />
+  <link rel="stylesheet" href="/css/register.css" />
+</head>
+<body class="reg-body">
+  <a class="skip-link" href="#regMain">Skip to form</a>
+  <main class="reg-wrap" id="regMain">
+    <header class="reg-head">
+      <div class="reg-brand">
+        <span class="reg-logo" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 2 2 7l10 5 10-5-10-5Z"/><path d="m2 17 10 5 10-5"/><path d="m2 12 10 5 10-5"/></svg></span>
+        <span class="reg-app">LifegenTracker</span>
+      </div>
+      <h1>Lifegen Registration</h1>
+      <p class="reg-lead">Please complete the form below to register with Lifegen. It takes about a minute.</p>
+      <ol class="reg-steps" aria-label="Progress">
+        <li class="is-current" data-step-dot="1">Basic info</li>
+        <li data-step-dot="2">Ministry &amp; leaders</li>
+        <li data-step-dot="3">Review</li>
+      </ol>
+    </header>
+
+    <div id="regLoading" class="card reg-card"><div class="loading">Loading…</div></div>
+
+    <section id="regClosed" class="card reg-card" hidden>
+      <div class="reg-closed">
+        <div class="empty__icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div>
+        <h2 id="regClosedTitle">Registration is currently unavailable</h2>
+        <p id="regClosedMsg">The Lifegen team has paused online registration for now. Please approach any Lifegen leader or usher this Sunday and we will register you personally.</p>
+        <p class="reg-ref" id="regClosedRef" hidden>Your reference: <strong></strong></p>
+      </div>
+    </section>
+
+    <form id="regForm" class="card reg-card" novalidate hidden autocomplete="on">
+      <!-- Step 1 -->
+      <fieldset class="reg-step" data-step="1">
+        <legend class="reg-step-title"><span class="reg-step-no">1</span> Basic information</legend>
+        <div class="field">
+          <label for="full_name">Full name <span class="req" aria-hidden="true">*</span></label>
+          <input class="input" id="full_name" name="full_name" type="text" autocomplete="name" autocapitalize="words" maxlength="120" required placeholder="e.g. Juan Dela Cruz" />
+          <span class="help">First name and last name — the way you want to be called.</span>
+          <span class="error" data-error-for="full_name" role="alert"></span>
+          <span class="alert alert--warn" id="nameWarn" hidden role="status">A person with this name is already registered. Please check your information — make sure the email below is yours. If it is you, you do not need to register again.</span>
+        </div>
+        <div class="field">
+          <label for="email">Email / Gmail <span class="req" aria-hidden="true">*</span></label>
+          <input class="input" id="email" name="email" type="email" inputmode="email" autocomplete="email" autocapitalize="off" spellcheck="false" maxlength="160" required placeholder="name@gmail.com" />
+          <span class="help">One email = one registration. We will only use it to reach you about Lifegen.</span>
+          <span class="error" data-error-for="email" role="alert"></span>
+        </div>
+        <div class="field reg-age">
+          <label for="age">Age <span class="req" aria-hidden="true">*</span></label>
+          <input class="input" id="age" name="age" type="number" inputmode="numeric" min="5" max="100" step="1" required placeholder="18" />
+          <span class="error" data-error-for="age" role="alert"></span>
+        </div>
+        <div class="field">
+          <label for="school">School <span class="req" aria-hidden="true">*</span></label>
+          <input class="input" id="school" name="school" type="text" list="schoolList" autocomplete="organization" autocapitalize="words" maxlength="120" required placeholder="e.g. Bulacan State University" />
+          <datalist id="schoolList"></datalist>
+          <span class="help">If you are no longer studying, write your last school or “Working”.</span>
+          <span class="error" data-error-for="school" role="alert"></span>
+        </div>
+        <!-- honeypot: hidden from humans, bots fill it -->
+        <div class="reg-hp" aria-hidden="true"><label for="website">Website</label><input id="website" name="website" type="text" tabindex="-1" autocomplete="off" /></div>
+        <div class="form-actions reg-actions">
+          <button type="button" class="btn btn--primary btn--lg" data-next="2">Continue</button>
+        </div>
+      </fieldset>
+
+      <!-- Step 2 -->
+      <fieldset class="reg-step" data-step="2" hidden>
+        <legend class="reg-step-title"><span class="reg-step-no">2</span> Ministry &amp; leaders</legend>
+        <div class="field">
+          <label for="ministry">Ministry <span class="req" aria-hidden="true">*</span></label>
+          <select class="select" id="ministry" name="ministry" required>
+            <option value="">Choose a ministry…</option>
+          </select>
+          <span class="help">Choose “Not yet in a ministry” if you are new.</span>
+          <span class="error" data-error-for="ministry" role="alert"></span>
+        </div>
+        <div class="field">
+          <label for="leader_name">Leader name <span class="req" aria-hidden="true">*</span></label>
+          <input class="input" id="leader_name" name="leader_name" type="text" list="leaderList" autocapitalize="words" autocomplete="off" maxlength="120" required placeholder="Your Lifegroup leader" />
+          <datalist id="leaderList"></datalist>
+          <span class="help">The leader who invited you or whom you talk to. Write “None yet” if you don’t have one.</span>
+          <span class="error" data-error-for="leader_name" role="alert"></span>
+        </div>
+        <div class="field">
+          <label for="network_leader_name">Network leader name <span class="req" aria-hidden="true">*</span></label>
+          <input class="input" id="network_leader_name" name="network_leader_name" type="text" list="networkLeaderList" autocapitalize="words" autocomplete="off" maxlength="120" required placeholder="Your leader's network leader" />
+          <datalist id="networkLeaderList"></datalist>
+          <span class="help">Not sure? Write “Not sure” and the team will fill it in.</span>
+          <span class="error" data-error-for="network_leader_name" role="alert"></span>
+        </div>
+        <div class="form-actions reg-actions">
+          <button type="button" class="btn btn--lg" data-prev="1">Back</button>
+          <button type="button" class="btn btn--primary btn--lg" data-next="3">Review</button>
+        </div>
+      </fieldset>
+
+      <!-- Step 3 -->
+      <fieldset class="reg-step" data-step="3" hidden>
+        <legend class="reg-step-title"><span class="reg-step-no">3</span> Review your details</legend>
+        <p class="reg-review-lead">Please check that everything is correct before submitting.</p>
+        <dl class="reg-review" id="regReview"></dl>
+        <div id="regDupWarn" class="alert alert--warn" hidden role="status">
+          <span><strong>A person with this name is already registered.</strong> Please check your information. If that is you, you don’t need to register again — just tell your leader. If you are a different person, you may continue; the Lifegen admin will review it.</span>
+        </div>
+        <div id="regSubmitError" class="alert alert--error" hidden role="alert"></div>
+        <p class="reg-privacy">
+          <strong>Privacy notice.</strong> Your information will be used by the Lifegen team for registration, ministry coordination, and attendance/member management. It is not shared with third parties or shown publicly. By submitting, you agree to this use. You may ask the Lifegen admin to update or delete your record at any time. <a href="/#/privacy" target="_blank" rel="noopener">Read the full privacy notice</a>.
+        </p>
+        <div class="form-actions reg-actions">
+          <button type="button" class="btn btn--lg" data-prev="2">Back</button>
+          <button type="submit" class="btn btn--primary btn--lg" id="regSubmit" disabled>Submit Registration</button>
+        </div>
+      </fieldset>
+    </form>
+
+    <section id="regSuccess" class="card reg-card" hidden>
+      <div class="reg-done">
+        <div class="reg-done-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg></div>
+        <h2>Registration Submitted</h2>
+        <p>Thank you! Your registration has been received.</p><p>Please wait for the Lifegen team to review your registration.</p>
+        <p class="reg-ref">Registration Reference: <strong id="regRefCode"></strong></p>
+        <p class="muted">Take a screenshot of this reference. You may now close this page.</p>
+      </div>
+    </section>
+
+    <section id="regFailed" class="card reg-card" hidden>
+      <div class="reg-done">
+        <div class="reg-done-icon reg-done-icon--error" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4m0 4h.01"/></svg></div>
+        <h2>Registration Failed</h2>
+        <p id="regFailedMsg">We couldn’t complete your registration right now. Please try again.</p>
+        <p class="muted">Your answers are still here — nothing was lost.</p>
+        <div class="form-actions reg-actions" style="justify-content:center">
+          <button type="button" class="btn btn--primary btn--lg" id="regRetry">Retry</button>
+        </div>
+      </div>
+    </section>
+
+    <footer class="reg-foot">
+      <span id="regChurch">Lifegiver Church of Faith · Lifegen</span>
+      <a href="/#/privacy">Privacy</a>
+    </footer>
+  </main>
+  <noscript><p style="padding:24px;font-family:sans-serif">This form needs JavaScript enabled.</p></noscript>
+  <script type="module" src="/js/register.js"></script>
+</body>
+</html>
