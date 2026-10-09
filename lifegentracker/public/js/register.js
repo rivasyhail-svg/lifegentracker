@@ -8,12 +8,18 @@ const STEP_FIELDS = { 1: ['full_name', 'email', 'age', 'school'], 2: ['ministry'
 const DRAFT_KEY = 'lifegen.register.draft'; // sessionStorage only: survives a refresh, cleared on success
 
 const form = $('#regForm');
+const QR_TOKEN = (new URLSearchParams(location.search).get('k') || '').trim().toUpperCase(); // rotating-QR token (empty in reusable mode)
 let options = null;
+let formToken = null;
+let deviceHeader = null; // fallback when the browser drops the httpOnly device cookie
 let step = 1;
 let lastCheck = { email_taken: false, name_match: false };
 
 async function api(method, url, body) {
-  const res = await fetch(url, { method, headers: H, body: body === undefined ? undefined : JSON.stringify(body), cache: 'no-store' });
+  const headers = { ...H };
+  if (deviceHeader) headers['X-Lifegen-Device'] = deviceHeader;
+  const res = await fetch(url, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), cache: 'no-store', credentials: 'same-origin' });
+  const dev = res.headers.get('X-Lifegen-Device'); if (dev) { deviceHeader = dev; try { localStorage.setItem('lifegen.device', dev); } catch { /* ignore */ } }
   let data = null;
   try { data = await res.json(); } catch { data = null; }
   if (!res.ok) { const e = new Error((data && data.error) || `Request failed (${res.status})`); e.status = res.status; e.details = data && data.details; throw e; }
@@ -147,6 +153,8 @@ async function submit() {
   for (const f of FIELDS) body[f] = f2(f, v[f]);
   body.age = Number(body.age);
   body.website = v.website;
+  body.form_token = formToken;
+  if (QR_TOKEN) body.qr_token = QR_TOKEN;
   try {
     const r = await api('POST', '/api/public/register', body);
     try { sessionStorage.removeItem(DRAFT_KEY); } catch { /* ignore */ }
@@ -156,17 +164,25 @@ async function submit() {
     window.scrollTo({ top: 0 });
     $('#regSuccess h2').setAttribute('tabindex', '-1'); $('#regSuccess h2').focus();
   } catch (e) {
-    if (e.status === 400 && e.details && typeof e.details === 'object') {
+    if (e.status === 400 && e.details && e.details.form === 'too_fast') {
+      const box = $('#regSubmitError'); box.textContent = e.message; box.hidden = false;
+    } else if (e.status === 400 && e.details && e.details.form === 'expired') {
+      // form token aged out (phone slept for hours) → fetch a fresh one and let them tap Submit again; answers are kept
+      try { const o = await api('GET', '/api/public/register/options' + (QR_TOKEN ? `?k=${encodeURIComponent(QR_TOKEN)}` : '')); formToken = o.form_token || formToken; } catch { /* keep old */ }
+      const box = $('#regSubmitError'); box.textContent = 'Your session was refreshed. Please tap Submit Registration again.'; box.hidden = false;
+    } else if (e.status === 400 && e.details && typeof e.details === 'object') {
       // field-level errors from the server → jump to the step that has the first one
       let firstStep = null;
       for (const [f, msg] of Object.entries(e.details)) { showError(f, msg); if (!firstStep) firstStep = STEP_FIELDS[1].includes(f) ? 1 : 2; }
       goto(firstStep || 1);
+    } else if (e.status === 409 && e.details && e.details.reason === 'device') {
+      showClosed({ reason: 'device', message: e.message, ref_code: e.details.ref_code });
     } else if (e.status === 409) {
       lastCheck = { ...lastCheck, email_taken: true, for_email: body.email };
       showError('email', e.message);
       const box = $('#regSubmitError'); box.textContent = e.message; box.hidden = false;
     } else if (e.status === 403) {
-      form.hidden = true; $('#regClosed').hidden = false; $('.reg-steps').hidden = true;
+      showClosed({ reason: (e.details && e.details.reason) || 'disabled', message: e.message });
     } else if (e.status === 429) {
       const box = $('#regSubmitError'); box.textContent = e.message; box.hidden = false;
     } else {
@@ -181,6 +197,25 @@ async function submit() {
   }
 }
 
+// ---- closed states (window / expired QR / paused / disabled / blocked / device) ----
+const CLOSED_TITLES = {
+  disabled: 'Registration is currently unavailable',
+  window: 'Registration is closed right now',
+  expired: 'This QR code has expired',
+  paused: 'Registration is paused for a moment',
+  blocked: 'Registration could not be submitted',
+  device: 'This phone already registered',
+  ip_cap: 'Please see an usher',
+};
+function showClosed({ reason, message, ref_code }) {
+  form.hidden = true; $('.reg-steps').hidden = true; $('#regFailed').hidden = true;
+  $('#regClosedTitle').textContent = CLOSED_TITLES[reason] || CLOSED_TITLES.disabled;
+  $('#regClosedMsg').textContent = message || 'The Lifegen team has paused online registration for now. Please approach any Lifegen leader or usher this Sunday and we will register you personally.';
+  const ref = $('#regClosedRef'); ref.hidden = !ref_code; if (ref_code) ref.querySelector('strong').textContent = ref_code;
+  $('#regClosed').hidden = false;
+  window.scrollTo({ top: 0 });
+}
+
 // ---- boot ----
 function fillList(id, items) {
   const dl = $(id);
@@ -188,8 +223,9 @@ function fillList(id, items) {
   for (const v of items || []) { const o = document.createElement('option'); o.value = v; dl.appendChild(o); }
 }
 async function boot() {
+  try { deviceHeader = localStorage.getItem('lifegen.device') || null; } catch { /* ignore */ }
   try {
-    options = await api('GET', '/api/public/register/options');
+    options = await api('GET', '/api/public/register/options' + (QR_TOKEN ? `?k=${encodeURIComponent(QR_TOKEN)}` : ''));
   } catch (e) {
     $('#regLoading').hidden = true;
     $('#regFailedMsg').textContent = 'We couldn’t load the registration form right now. Please check your internet connection and try again.';
@@ -199,7 +235,12 @@ async function boot() {
   }
   $('#regLoading').hidden = true;
   if (options.church_name) $('#regChurch').textContent = `${options.church_name} · ${options.service_name || 'Lifegen'}`;
-  if (!options.enabled) { $('#regClosed').hidden = false; $('.reg-steps').hidden = true; return; }
+  if (!options.enabled) { showClosed({ reason: options.closed_reason, message: options.closed_message }); return; }
+  if (options.already_registered) {
+    showClosed({ reason: 'device', message: `This phone already submitted a registration. One registration per person — if you need to change something, please tell your leader or the Lifegen admin.`, ref_code: options.ref_code });
+    return;
+  }
+  formToken = options.form_token;
   const sel = form.elements.ministry;
   for (const m of options.ministries) { const o = document.createElement('option'); o.value = m; o.textContent = m; sel.appendChild(o); }
   fillList('#schoolList', options.schools);

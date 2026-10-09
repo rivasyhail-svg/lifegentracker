@@ -12,7 +12,7 @@ const { HttpError } = require('../lib/util');
 
 const FORMAT = 'lifegentracker-backup';
 const FORMAT_VERSION = 1;
-const TABLES = ['users', 'settings', 'people', 'services', 'attendance_records', 'attendance_audit', 'activity_log', 'networks', 'lifegroups', 'lifegroup_memberships', 'registrations'];
+const TABLES = ['users', 'settings', 'people', 'services', 'attendance_records', 'attendance_audit', 'activity_log', 'networks', 'lifegroups', 'lifegroup_memberships', 'registrations', 'lifegroup_meetings', 'lifegroup_meeting_attendance', 'registration_blocks'];
 const KEEP = 14;
 
 function exportJson(db) {

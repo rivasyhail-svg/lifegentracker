@@ -129,9 +129,9 @@ export const api = {
   serviceAudit: (id) => request('GET', `/api/services/${id}/audit`),
   openService: (service_date) => request('POST', '/api/services', { service_date }),
   updateService: (id, data) => request('PUT', `/api/services/${id}`, data),
-  mark: (serviceId, personId, status, classification) =>
-    request('PUT', `/api/services/${serviceId}/records/${personId}`, { status, classification }),
-  undoMark: (serviceId, personId) => request('DELETE', `/api/services/${serviceId}/records/${personId}`),
+  mark: (serviceId, personId, status, classification, reason) =>
+    request('PUT', `/api/services/${serviceId}/records/${personId}`, { status, classification, ...(reason ? { reason } : {}) }),
+  undoMark: (serviceId, personId, reason) => request('DELETE', `/api/services/${serviceId}/records/${personId}` + (reason ? `?reason=${encodeURIComponent(reason)}` : '')),
 
   // Dashboard / reports / search
   dashboard: () => request('GET', '/api/dashboard'),
@@ -157,9 +157,25 @@ export const api = {
   registration: (id) => request('GET', `/api/registrations/${id}`),
   updateRegistration: (id, data) => request('PUT', `/api/registrations/${id}`, data),
   approveRegistration: (id, data = {}) => request('POST', `/api/registrations/${id}/approve`, data),
-  rejectRegistration: (id, note) => request('POST', `/api/registrations/${id}/reject`, { note }),
+  rejectRegistration: (id, note, blocks = {}) => request('POST', `/api/registrations/${id}/reject`, { note, ...blocks }),
+  bulkRejectRegistrations: (ids, note, blocks = {}) => request('POST', '/api/registrations/bulk-reject', { ids, note, ...blocks }),
+  registrationGuard: () => request('GET', '/api/registrations/guard'),
+  registrationResume: () => request('POST', '/api/registrations/guard/resume', {}),
+  registrationRotate: () => request('POST', '/api/registrations/guard/rotate', {}),
+  registrationOpenNow: (hours) => request('POST', '/api/registrations/guard/open-now', { hours }),
+  registrationBlocks: () => request('GET', '/api/registrations/blocks'),
+  addRegistrationBlock: (data) => request('POST', '/api/registrations/blocks', data),
+  removeRegistrationBlock: (id) => request('DELETE', `/api/registrations/blocks/${id}`),
   deleteRegistration: (id) => request('DELETE', `/api/registrations/${id}`),
   qrRegistration: () => request('GET', '/api/qr/registration'),
+  // Lifegroup progress
+  lifegroupProgress: (id, weeks) => request('GET', `/api/lifegroups/${id}/progress${weeks ? `?weeks=${weeks}` : ''}`),
+  progressOverview: (weeks) => request('GET', `/api/lifegroups/progress/overview${weeks ? `?weeks=${weeks}` : ''}`),
+  networkCalendar: (id, weeks) => request('GET', `/api/networks/${id}/calendar${weeks ? `?weeks=${weeks}` : ''}`),
+  setTier: (groupId, personId, tier) => request('PUT', `/api/lifegroups/${groupId}/members/${personId}/tier`, { tier }),
+  saveMeeting: (groupId, body) => request('POST', `/api/lifegroups/${groupId}/meetings`, body),
+  deleteMeeting: (groupId, meetingId) => request('DELETE', `/api/lifegroups/${groupId}/meetings/${meetingId}`),
+  resetReportLink: (groupId) => request('POST', `/api/lifegroups/${groupId}/report-link/reset`, {}),
   /** Fetch a binary (PNG) with the session headers — cookies may be blocked when embedded. */
   blob: async (url) => {
     const headers = { 'X-Requested-With': 'LifegenTracker' };

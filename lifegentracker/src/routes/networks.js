@@ -9,6 +9,7 @@ const { getDb } = require('../db');
 const { clean, HttpError, wrap, intId } = require('../lib/util');
 const { requirePermission, can } = require('../middleware/auth');
 const activity = require('../services/activity');
+const prog = require('../services/lifegroup-progress');
 
 const router = express.Router();
 const SEX_OF = { boys: 'male', girls: 'female' };
@@ -108,6 +109,11 @@ function withTotals(rows) {
   rows.filter((n) => !n.parent_network_id || !rows.some((x) => x.id === n.parent_network_id)).forEach((n) => sum(n));
   return rows;
 }
+
+// GET /api/networks/:id/calendar — week-by-week: did the leader's own group and each group under it meet?
+router.get('/:id/calendar', requirePermission('lifegroups:view'), wrap((req, res) => {
+  res.json(prog.networkCalendar(getDb(), intId(req.params.id), { weeks: Math.min(Math.max(Number(req.query.weeks) || 8, 4), 26) }));
+}));
 
 // GET /api/networks/:id — network + its groups (with leaders) + child networks
 router.get('/:id', requirePermission('lifegroups:view'), wrap((req, res) => {

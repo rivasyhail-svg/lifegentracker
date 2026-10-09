@@ -125,8 +125,12 @@ router.put(
 // ---------------------------------------------------------------------------
 // Settings
 // ---------------------------------------------------------------------------
-const QR_KEYS = ['qr_registration_enabled', 'qr_require_approval', 'qr_show_leaders', 'qr_name_duplicate_check', 'qr_public_url', 'qr_ministries'];
-const SETTING_KEYS = ['church_name', 'service_name', 'church_address', 'church_contact', 'privacy_contact', ...QR_KEYS];
+const QR_KEYS = ['qr_registration_enabled', 'qr_require_approval', 'qr_show_leaders', 'qr_name_duplicate_check', 'qr_public_url', 'qr_ministries',
+  'qr_mode', 'qr_window', 'qr_window_start', 'qr_window_end', 'qr_timezone', 'qr_device_lock', 'qr_hourly_cap', 'qr_ip_daily_cap'];
+const QR_ENUM = { qr_mode: ['reusable', 'rotating'], qr_window: ['always', 'sunday'] };
+const QR_TEXT = new Set(['qr_public_url', 'qr_ministries', 'qr_window_start', 'qr_window_end', 'qr_timezone', 'qr_hourly_cap', 'qr_ip_daily_cap', ...Object.keys(QR_ENUM)]);
+const RULE_KEYS = ['attendance_sunday_lock', 'lifegroup_solid_target'];
+const SETTING_KEYS = ['church_name', 'service_name', 'church_address', 'church_contact', 'privacy_contact', ...QR_KEYS, ...RULE_KEYS];
 const OPTIONAL_SETTINGS = new Set(['church_address', 'church_contact', 'privacy_contact', ...QR_KEYS]);
 
 router.put(
@@ -142,7 +146,13 @@ router.put(
           if (!v && !OPTIONAL_SETTINGS.has(k)) throw new HttpError(400, `${k.replace('_', ' ')} cannot be empty.`);
           if (v.length > (k === 'qr_ministries' ? 1000 : 300)) throw new HttpError(400, `${k.replace('_', ' ')} is too long.`);
           if (k === 'qr_public_url' && v && !/^https?:\/\/[^\s]+$/i.test(v)) throw new HttpError(400, 'Public URL must start with http:// or https://');
-          if (k.startsWith('qr_') && k !== 'qr_public_url' && k !== 'qr_ministries' && !['0', '1'].includes(v)) throw new HttpError(400, `${k} must be on (1) or off (0).`);
+          if (QR_ENUM[k] && !QR_ENUM[k].includes(v)) throw new HttpError(400, `${k} must be one of: ${QR_ENUM[k].join(', ')}.`);
+          if ((k === 'qr_window_start' || k === 'qr_window_end') && !/^([01]?\d|2[0-3]):[0-5]\d$/.test(v)) throw new HttpError(400, 'Window times must look like 12:00 (24-hour clock).');
+          if ((k === 'qr_hourly_cap' || k === 'qr_ip_daily_cap') && !/^\d{1,4}$/.test(v)) throw new HttpError(400, 'Caps must be a whole number (0 = off).');
+          if (k === 'qr_timezone') { try { new Intl.DateTimeFormat('en-US', { timeZone: v }); } catch { throw new HttpError(400, 'Unknown time zone. Example: Asia/Manila'); } }
+          if (k.startsWith('qr_') && !QR_TEXT.has(k) && !['0', '1'].includes(v)) throw new HttpError(400, `${k} must be on (1) or off (0).`);
+          if (k === 'attendance_sunday_lock' && !['0', '1'].includes(v)) throw new HttpError(400, 'attendance_sunday_lock must be on (1) or off (0).');
+          if (k === 'lifegroup_solid_target' && !/^([1-9]|[1-4]\d|50)$/.test(v)) throw new HttpError(400, 'Solid target must be a whole number from 1 to 50.');
           upd.run(k, v);
         }
       }

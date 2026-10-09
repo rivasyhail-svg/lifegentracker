@@ -99,8 +99,8 @@ function load(db, userId) {
     const netGirls = insertNet.run('Demo Girls Network', 'girls', females[5].id, null, userId).lastInsertRowid;
     const netA = insertNet.run('Demo Network A (boys)', 'boys', males[9].id, netBoys, userId).lastInsertRowid;
     const netB = insertNet.run('Demo Network B (girls)', 'girls', females[9].id, netGirls, userId).lastInsertRowid;
-    const insertGroup = db.prepare(`INSERT INTO lifegroups (name, gender, leader_person_id, network_id, network, area, schedule_day, schedule_time, category, capacity, venue, notes, is_demo, created_by)
-      VALUES (@name, @gender, @leader, @network_id, @network, @area, @day, @time, @category, @capacity, @venue, 'DEMO DATA', 1, @uid)`);
+    const insertGroup = db.prepare(`INSERT INTO lifegroups (name, gender, leader_person_id, network_id, network_manual, network, area, schedule_day, schedule_time, category, capacity, venue, notes, is_demo, created_by)
+      VALUES (@name, @gender, @leader, @network_id, 1, @network, @area, @day, @time, @category, @capacity, @venue, 'DEMO DATA', 1, @uid)`);
     const groups = [
       { name: 'Demo Joshua Group', gender: 'boys', leader: males[3].id, network_id: netA, network: 'Demo Network A (boys)', area: 'Kaybanban', day: 'sat', time: '17:00', category: 'Students', capacity: 12, venue: 'Demo venue 1' },
       { name: 'Demo Ruth Group', gender: 'girls', leader: females[3].id, network_id: netB, network: 'Demo Network B (girls)', area: 'Kaybanban', day: 'sat', time: '16:00', category: 'Students', capacity: 12, venue: 'Demo venue 2' },
@@ -109,7 +109,7 @@ function load(db, userId) {
     ].map((g) => insertGroup.run({ ...g, uid: userId }).lastInsertRowid);
     const [JOSHUA, RUTH, DAVID, ESTHER] = groups;
     const leaderOf = new Map([[males[3].id, JOSHUA], [females[3].id, RUTH], [males[7].id, DAVID], [females[10].id, ESTHER]]);
-    const insertM = db.prepare('INSERT INTO lifegroup_memberships (person_id, lifegroup_id, role, joined_at, left_at, assigned_by) VALUES (?, ?, ?, ?, ?, ?)');
+    const insertM = db.prepare("INSERT INTO lifegroup_memberships (person_id, lifegroup_id, role, tier, joined_at, left_at, assigned_by) VALUES (?, ?, ?, 'new', ?, ?, ?)");
     const areas = ['Kaybanban', 'Muzon', 'Tungkong Mangga', 'Sapang Palay'];
     const setPref = db.prepare('UPDATE people SET preferred_area = ?, preferred_day = ?, preferred_time = ? WHERE id = ?');
     const mid = Math.floor(sundays.length / 2);
@@ -122,6 +122,28 @@ function load(db, userId) {
       if (p === males[1]) { insertM.run(p.id, DAVID, 'member', sundays[0], sundays[mid], userId); insertM.run(p.id, JOSHUA, 'member', sundays[mid], null, userId); return; } // a move, kept in history
       insertM.run(p.id, g, 'member', sundays[Math.min(p.joinIdx + 1, sundays.length - 1)], null, userId);
     });
+    // Progress demo: some long-time members tagged Solid, and weekly meeting reports for the last 6 weeks.
+    db.prepare(`UPDATE lifegroup_memberships SET tier = 'solid' WHERE left_at IS NULL AND lifegroup_id IN (${groups.join(',')})
+      AND person_id IN (SELECT id FROM people WHERE is_demo = 1 AND status IN ('member','leader','volunteer','regular'))`).run();
+    db.prepare("UPDATE lifegroup_memberships SET tier = 'solid' WHERE left_at IS NULL AND lifegroup_id = ?").run(JOSHUA); // one solid Lifegroup in the demo
+    const insertMeet = db.prepare(`INSERT OR IGNORE INTO lifegroup_meetings (lifegroup_id, meeting_date, held, no_meeting_reason, topic, notes, present_count, submitted_via, submitted_by_name)
+      VALUES (?, ?, ?, ?, ?, 'DEMO DATA', ?, 'leader_link', 'Demo leader')`);
+    const insertMA = db.prepare('INSERT OR IGNORE INTO lifegroup_meeting_attendance (meeting_id, person_id) VALUES (?, ?)');
+    const topics = ['Prayer', 'Identity in Christ', 'Serving', 'Faith', 'Community', 'Generosity'];
+    const dayOffset = { sat: 6, fri: 5 };
+    groups.forEach((gid, gi) => {
+      const g = db.prepare('SELECT schedule_day FROM lifegroups WHERE id = ?').get(gid);
+      const mem = db.prepare('SELECT person_id FROM lifegroup_memberships WHERE lifegroup_id = ? AND left_at IS NULL').all(gid).map((r) => r.person_id);
+      for (let w = 6; w >= 1; w -= 1) {
+        const mon = new Date(); mon.setDate(mon.getDate() - ((mon.getDay() + 6) % 7) - 7 * w);
+        const d = new Date(mon); d.setDate(d.getDate() + (dayOffset[g.schedule_day] ?? 5));
+        const date = d.toISOString().slice(0, 10);
+        if ((w + gi) % 5 === 0) { insertMeet.run(gid, date, 0, 'Demo: exams week', null, 0); continue; }
+        const present = mem.filter((_, i) => (i + w) % 4 !== 0);
+        const id = insertMeet.run(gid, date, 1, null, topics[(w + gi) % topics.length], present.length).lastInsertRowid;
+        for (const pid of present) insertMA.run(id, pid);
+      }
+    });
   })();
 
   return { ...status(db), message: 'Demo data loaded.' };
@@ -129,6 +151,8 @@ function load(db, userId) {
 
 function remove(db) {
   db.transaction(() => {
+    db.prepare('DELETE FROM lifegroup_meeting_attendance WHERE meeting_id IN (SELECT id FROM lifegroup_meetings WHERE lifegroup_id IN (SELECT id FROM lifegroups WHERE is_demo = 1))').run();
+    db.prepare('DELETE FROM lifegroup_meetings WHERE lifegroup_id IN (SELECT id FROM lifegroups WHERE is_demo = 1)').run();
     db.prepare('DELETE FROM lifegroup_memberships WHERE lifegroup_id IN (SELECT id FROM lifegroups WHERE is_demo = 1)').run();
     db.prepare('DELETE FROM lifegroups WHERE is_demo = 1').run();
     db.prepare('DELETE FROM networks WHERE is_demo = 1').run();

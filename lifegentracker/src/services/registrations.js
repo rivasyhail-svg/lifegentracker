@@ -9,6 +9,7 @@ const { getDb } = require('../db');
 const { clean, HttpError, today } = require('../lib/util');
 const { normalizeEmail, isValidEmail, normalizeName, tidyName, splitFullName, isSqliteUnique } = require('../lib/normalize');
 const activity = require('./activity');
+const guard = require('./qrguard');
 
 const ci = (a, b) => String(a).localeCompare(String(b), undefined, { sensitivity: 'base' }); // case-insensitive sort (dialect-free)
 
@@ -27,11 +28,19 @@ function ministries(db, s = settings(db)) {
 }
 
 /** What the public form may see: never personal data, only pick-lists. */
-function publicOptions(db) {
+function publicOptions(db, { token, device_id } = {}) {
   const s = settings(db);
-  const enabled = on(s.qr_registration_enabled);
-  const out = { enabled, church_name: s.church_name, service_name: s.service_name, ministries: ministries(db, s), schools: [], leaders: [], network_leaders: [], name_check: on(s.qr_name_duplicate_check) };
+  const st = guard.status(db, s, { token });
+  const enabled = st.open;
+  const out = { enabled, closed_reason: enabled ? null : st.reason, closed_message: enabled ? null : st.message, window: st.window, window_label: st.window_label,
+    church_name: s.church_name, service_name: s.service_name, ministries: ministries(db, s), schools: [], leaders: [], network_leaders: [], name_check: on(s.qr_name_duplicate_check),
+    device_lock: on(s.qr_device_lock), min_seconds: guard.MIN_FORM_SECONDS };
   if (!enabled) return out;
+  if (out.device_lock && device_id) {
+    const prev = db.prepare("SELECT ref_code FROM registrations WHERE device_id = ? AND status <> 'rejected' ORDER BY id DESC LIMIT 1").get(device_id);
+    if (prev) { out.already_registered = true; out.ref_code = prev.ref_code; }
+  }
+  out.form_token = guard.formToken(db);
   out.schools = db.prepare("SELECT DISTINCT trim(school) AS v FROM people WHERE school IS NOT NULL AND trim(school) <> '' AND archived_at IS NULL LIMIT 300").all().map((r) => r.v).sort(ci);
   if (on(s.qr_show_leaders)) {
     // first + last name of active leaders only (no contact details, no ids)
@@ -46,7 +55,7 @@ function publicOptions(db) {
 }
 
 /** Validate + normalise a public submission (also used by the admin Edit). Throws 400 with per-field errors. */
-function validate(body, db) {
+function validate(body, db, { strict = false } = {}) {
   const b = body || {};
   const data = {
     full_name: tidyName(b.full_name),
@@ -79,9 +88,16 @@ function validate(body, db) {
     if (list.length && !list.some((m) => m.toLowerCase() === data.ministry.toLowerCase())) errors.ministry = 'Please choose a ministry from the list.';
     else if (list.length) data.ministry = list.find((m) => m.toLowerCase() === data.ministry.toLowerCase());
   }
-  if (Object.keys(errors).length) throw new HttpError(400, Object.values(errors)[0], errors);
   data.email_normalized = normalizeEmail(data.email);
   data.full_name_normalized = normalizeName(data.full_name);
+  if (strict) { // public form: real-person rules (admin Edit keeps the relaxed rules so staff can fix odd-but-real names)
+    if (!errors.full_name) { const p = guard.nameProblem(data.full_name_normalized); if (p) errors.full_name = p; }
+    if (!errors.email) { const p = guard.emailProblem(data.email_normalized); if (p) errors.email = p; }
+    for (const k of ['school', 'leader_name', 'network_leader_name']) {
+      if (!errors[k] && /(.)\1\1\1/.test(data[k]) ) errors[k] = 'Please check this field — it does not look right.';
+    }
+  }
+  if (Object.keys(errors).length) throw new HttpError(400, Object.values(errors)[0], errors);
   return data;
 }
 
@@ -116,25 +132,37 @@ function nextRefCode(db) {
 function submit(body, meta = {}) {
   const db = getDb();
   const s = settings(db);
-  if (!on(s.qr_registration_enabled)) throw new HttpError(403, 'Registration is currently unavailable. Please ask the Lifegen team.');
-  const data = validate(body, db);
+  const st = guard.status(db, s, { token: meta.token ?? body?.qr_token });
+  if (!st.open) throw new HttpError(403, st.message, { reason: st.reason });
+  const formSeconds = guard.checkFormToken(db, body?.form_token);
+  const data = validate(body, db, { strict: true });
   const ipHash = meta.ip ? crypto.createHash('sha256').update(String(meta.ip)).digest('hex').slice(0, 24) : null;
+  const deviceId = meta.deviceId || null;
   const requireApproval = on(s.qr_require_approval);
+  // blocklist first (quiet, generic message), then volume caps, then the per-device rule
+  if (guard.blocked(db, { email_normalized: data.email_normalized, device_id: deviceId, ip_hash: ipHash })) throw new HttpError(403, guard.BLOCKED_MSG, { reason: 'blocked' });
+  guard.enforceCaps(db, s, { ip_hash: ipHash });
   try {
     // One transaction: duplicate look-up + insert are atomic (SQLite serialises writers), and the
     // UNIQUE index on email_normalized is the final guard if two identical submits race.
     return db.transaction(() => {
+      if (on(s.qr_device_lock) && deviceId) {
+        const prev = db.prepare("SELECT ref_code FROM registrations WHERE device_id = ? AND status <> 'rejected' ORDER BY id DESC LIMIT 1").get(deviceId);
+        if (prev) throw new HttpError(409, `This phone already submitted a registration (${prev.ref_code}). One registration per person — if you need to change something, please tell your leader or the Lifegen admin.`, { reason: 'device', ref_code: prev.ref_code });
+      }
       const dup = duplicates(db, data);
       if (dup.email_taken) throw new HttpError(409, EMAIL_TAKEN_MSG, { email: EMAIL_TAKEN_MSG });
       const flag = on(s.qr_name_duplicate_check) && dup.name_match;
+      const flags = guard.riskFlags(db, { device_id: deviceId, ip_hash: ipHash, form_seconds: formSeconds, email_normalized: data.email_normalized, full_name_normalized: data.full_name_normalized });
       const info = db.prepare(`INSERT INTO registrations (full_name, full_name_normalized, email, email_normalized, age, school, leader_name, network_leader_name, ministry,
-          possible_duplicate, duplicate_note, ip_hash, user_agent)
-        VALUES (@full_name, @full_name_normalized, @email, @email_normalized, @age, @school, @leader_name, @network_leader_name, @ministry, @flag, @note, @ip, @ua)`)
-        .run({ ...data, flag: flag ? 1 : 0, note: flag ? `Same name as ${dup.name_match_ref} (different email) — please review.` : null, ip: ipHash, ua: String(meta.userAgent || '').slice(0, 160) });
+          possible_duplicate, duplicate_note, ip_hash, user_agent, device_id, risk_flags, form_seconds)
+        VALUES (@full_name, @full_name_normalized, @email, @email_normalized, @age, @school, @leader_name, @network_leader_name, @ministry, @flag, @note, @ip, @ua, @device, @risk, @secs)`)
+        .run({ ...data, flag: flag ? 1 : 0, note: flag ? `Same name as ${dup.name_match_ref} (different email) — please review.` : null, ip: ipHash, ua: String(meta.userAgent || '').slice(0, 160),
+          device: deviceId, risk: flags.length ? flags.join(',') : null, secs: formSeconds });
       const id = info.lastInsertRowid;
       const ref = nextRefCode(db);
       db.prepare('UPDATE registrations SET ref_code = ? WHERE id = ?').run(ref, id);
-      activity.log(db, null, 'registration.submit', 'registration', id, `New QR registration: ${data.full_name} (${ref})${flag ? ' — possible duplicate' : ''}`);
+      activity.log(db, null, 'registration.submit', 'registration', id, `New QR registration: ${data.full_name} (${ref})${flag ? ' — possible duplicate' : ''}${flags.length ? ' — flags: ' + flags.join(', ') : ''}`);
       let status = 'pending';
       if (!requireApproval) { approve(db, id, null, { mode: 'create' }); status = 'approved'; }
       return { ref_code: ref, status, possible_duplicate: flag };
@@ -206,13 +234,95 @@ function approve(db, id, user, { mode = 'create', person_id = null, status = 'fi
   }
 }
 
-function reject(db, id, user, note) {
+function reject(db, id, user, note, blocks = {}) {
   const reg = get(db, id);
   if (!reg) throw new HttpError(404, 'Registration not found.');
   if (reg.status === 'approved') throw new HttpError(409, 'Already approved — edit the person instead.');
   db.prepare("UPDATE registrations SET status = 'rejected', rejected_at = datetime('now'), reviewed_by = ?, review_note = ?, updated_at = datetime('now') WHERE id = ?").run(user.id, clean(note), id);
   activity.log(db, user, 'registration.reject', 'registration', id, `Rejected QR registration ${reg.ref_code} (${reg.full_name})${note ? ': ' + clean(note) : ''}`);
+  const reason = `Rejected ${reg.ref_code}${note ? ': ' + clean(note) : ''}`;
+  if (blocks.email) addBlock(db, user, 'email', reg.email_normalized, reason);
+  if (blocks.device && reg.device_id) addBlock(db, user, 'device', reg.device_id, reason);
+  if (blocks.ip && reg.ip_hash) addBlock(db, user, 'ip', reg.ip_hash, reason);
   return get(db, id);
+}
+
+/** Reject many pending rows at once (troll bursts). Returns { rejected, skipped }. */
+function bulkReject(db, ids, user, note, blocks = {}) {
+  const out = { rejected: 0, skipped: 0 };
+  db.transaction(() => {
+    for (const raw of ids) {
+      const id = Number(raw);
+      const r = Number.isInteger(id) ? get(db, id) : null;
+      if (!r || r.status !== 'pending') { out.skipped += 1; continue; }
+      reject(db, id, user, note, blocks);
+      out.rejected += 1;
+    }
+  })();
+  return out;
+}
+
+// --- blocklist ---------------------------------------------------------------
+const BLOCK_KINDS = ['email', 'domain', 'device', 'ip'];
+function addBlock(db, user, kind, value, reason) {
+  if (!BLOCK_KINDS.includes(kind)) throw new HttpError(400, 'Unknown block type.');
+  let v = clean(value);
+  if (!v) throw new HttpError(400, 'Value is required.');
+  if (kind === 'email') { v = normalizeEmail(v); if (!isValidEmail(v)) throw new HttpError(400, 'Enter a valid email address.'); }
+  if (kind === 'domain') { v = v.toLowerCase().replace(/^@/, ''); if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(v)) throw new HttpError(400, 'Enter a domain like example.com.'); }
+  db.prepare('INSERT OR IGNORE INTO registration_blocks (kind, value, reason, created_by) VALUES (?, ?, ?, ?)').run(kind, v, clean(reason) || null, user ? user.id : null);
+  activity.log(db, user, 'registration.block', 'registration_block', null, `Blocked ${kind} ${kind === 'email' || kind === 'domain' ? v : v.slice(0, 8) + '…'}${reason ? ' — ' + clean(reason) : ''}`);
+  return listBlocks(db);
+}
+function removeBlock(db, user, id) {
+  const b = db.prepare('SELECT * FROM registration_blocks WHERE id = ?').get(id);
+  if (!b) throw new HttpError(404, 'Block not found.');
+  db.prepare('DELETE FROM registration_blocks WHERE id = ?').run(id);
+  activity.log(db, user, 'registration.unblock', 'registration_block', id, `Unblocked ${b.kind} ${b.kind === 'email' || b.kind === 'domain' ? b.value : b.value.slice(0, 8) + '…'}`);
+}
+function listBlocks(db) {
+  return db.prepare(`SELECT b.*, u.display_name AS created_by_name,
+      (SELECT COUNT(*) FROM registrations r WHERE (b.kind = 'email' AND r.email_normalized = b.value) OR (b.kind = 'device' AND r.device_id = b.value) OR (b.kind = 'ip' AND r.ip_hash = b.value)) AS linked
+      FROM registration_blocks b LEFT JOIN users u ON u.id = b.created_by ORDER BY b.created_at DESC, b.id DESC LIMIT 500`).all();
+}
+
+// --- guard controls (admin) ----------------------------------------------------
+function guardState(db) {
+  const s = settings(db);
+  const st = guard.status(db, s, { token: s.qr_mode === 'rotating' ? guard.rotation(db, s).token : undefined });
+  const rot = guard.rotation(db, s);
+  const now = guard.churchNow(s.qr_timezone);
+  return {
+    mode: s.qr_mode === 'rotating' ? 'rotating' : 'reusable', window: st.window, window_label: st.window_label,
+    window_start: s.qr_window_start || '12:00', window_end: s.qr_window_end || '17:00', timezone: s.qr_timezone || 'Asia/Manila',
+    device_lock: on(s.qr_device_lock), hourly_cap: Number(s.qr_hourly_cap) || 0, ip_daily_cap: Number(s.qr_ip_daily_cap) || 0,
+    paused_at: s.qr_auto_paused_at || null, open_until: s.qr_open_until && Date.parse(s.qr_open_until) > Date.now() ? s.qr_open_until : null,
+    open_now: st.open, closed_reason: st.open ? null : st.reason,
+    church_time: `${guard.DAY_NAMES[now.dow]} ${guard.fmtTime(now.minutes)}`, church_date: now.date,
+    rotation: { token: rot.token, week_start: rot.week_start, valid_through: rot.valid_through },
+    last_hour: guard.recentCount(db, 60), blocks: db.prepare('SELECT COUNT(*) AS n FROM registration_blocks').get().n,
+  };
+}
+function setSetting(db, key, value) {
+  db.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')").run(key, value);
+}
+function resume(db, user) {
+  setSetting(db, 'qr_auto_paused_at', '');
+  activity.log(db, user, 'registration.resume', 'settings', null, 'QR registration resumed after auto-pause');
+  return guardState(db);
+}
+function rotate(db, user) {
+  const s = settings(db);
+  setSetting(db, 'qr_rotation_epoch', String((Number(s.qr_rotation_epoch) || 0) + 1));
+  activity.log(db, user, 'qr.rotate', 'settings', null, 'Generated a new rotating QR code — older printed codes no longer work');
+  return guardState(db);
+}
+function openNow(db, user, hours) {
+  const h = Math.min(12, Math.max(0, Number(hours) || 0));
+  const until = h ? new Date(Date.now() + h * 3600 * 1000).toISOString() : '';
+  setSetting(db, 'qr_open_until', until);
+  activity.log(db, user, 'qr.open_now', 'settings', null, h ? `Opened QR registration outside the Sunday window for ${h} hour${h === 1 ? '' : 's'}` : 'Closed the temporary registration window');
+  return guardState(db);
 }
 
 function update(db, id, user, body) {
@@ -262,4 +372,5 @@ function counts(db) {
   return { pending: row.pending || 0, approved: row.approved || 0, rejected: row.rejected || 0, total: row.total || 0, flagged: row.flagged || 0 };
 }
 
-module.exports = { FIELDS, MIN_AGE, MAX_AGE, publicOptions, validate, duplicates, submit, get, list, counts, approve, reject, update, remove, reviewContext, settings, on, EMAIL_TAKEN_MSG };
+module.exports = { FIELDS, MIN_AGE, MAX_AGE, publicOptions, validate, duplicates, submit, get, list, counts, approve, reject, bulkReject, update, remove, reviewContext, settings, on, EMAIL_TAKEN_MSG,
+  BLOCK_KINDS, addBlock, removeBlock, listBlocks, guardState, resume, rotate, openNow, guard };

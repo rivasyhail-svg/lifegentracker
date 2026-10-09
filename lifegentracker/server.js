@@ -120,6 +120,8 @@ app.use('/api', api);
 const PUBLIC_DIR = path.join(__dirname, 'public');
 // Public registration page opened by the printed QR code (no login).
 app.get('/register', (req, res) => { res.setHeader('Cache-Control', 'no-store'); res.sendFile(path.join(PUBLIC_DIR, 'register.html')); });
+// Private Lifegroup leader report page (link token in ?t=, no login).
+app.get('/lifegroup', (req, res) => { res.setHeader('Cache-Control', 'no-store'); res.sendFile(path.join(PUBLIC_DIR, 'lifegroup.html')); });
 app.use(express.static(PUBLIC_DIR, { index: 'index.html' }));
 app.use((req, res, next) => {
   if (req.method !== 'GET') return next();

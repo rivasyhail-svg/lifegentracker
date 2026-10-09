@@ -1,6 +1,6 @@
 import { api } from '../api.js';
 import { can, state } from '../app.js';
-import { html, raw, icon, avatar, fullName, statusBadge, classBadge, fmtDate, fmtTime, toISODate, lastSunday, isSundayStr, addDays, toast, openModal, closeModal, confirmDialog, withLoading, emptyState, debounce } from '../ui.js';
+import { html, raw, icon, avatar, fullName, statusBadge, classBadge, fmtDate, fmtTime, toISODate, lastSunday, isSundayStr, addDays, toast, openModal, closeModal, confirmDialog, promptDialog, withLoading, emptyState, debounce } from '../ui.js';
 import { personFormHtml, bindPhotoPicker, collectPerson, duplicateGuard } from './personForm.js';
 
 /**
@@ -11,7 +11,10 @@ import { personFormHtml, bindPhotoPicker, collectPerson, duplicateGuard } from '
  * mistakes without touching history elsewhere.
  */
 export async function renderAttendance({ main, query }) {
-  const writable = can('attendance:write');
+  const canWrite = can('attendance:write');
+  let writable = canWrite;          // false when the Sunday lock closes this date for this user
+  let lock = { live: true, can_correct: false, message: '' };
+  const correction = () => canWrite && !lock.live && lock.can_correct;
   const today = toISODate(new Date());
   let date = query.date && isSundayStr(query.date) ? query.date : toISODate(lastSunday());
   let service = null;   // { id, present_count, ..., roster } — id is null until the first mark
@@ -57,6 +60,8 @@ export async function renderAttendance({ main, query }) {
     dateLabel.textContent = fmtDate(date, { weekday: true });
     try {
       const r = await api.serviceByDate(date);
+      lock = r.lock || { live: true, can_correct: false, message: '' };
+      writable = canWrite && (lock.live || lock.can_correct);
       if (r.exists) {
         service = await api.service(r.service.id);
       } else {
@@ -92,6 +97,7 @@ export async function renderAttendance({ main, query }) {
   function renderRoster() {
     const c = counts();
     content.innerHTML = html`
+      ${canWrite && lock.message ? html`<div class="alert ${correction() ? 'alert--warn' : 'alert--info'} mb-2">${icon(correction() ? 'warn' : 'lock', 18)}<span>${lock.message}</span></div>` : ''}
       <div class="card mb-2">
         <div class="card__body" style="padding:14px 20px">
           <div class="row row--between">
@@ -205,9 +211,15 @@ export async function renderAttendance({ main, query }) {
     const person = service.roster.find((p) => p.id === pid);
     const act = btn.dataset.act;
 
-    if (act === 'toggle' && person.att_status === 'present') {
+    if (act === 'toggle' && person.att_status === 'present' && !correction()) {
       const ok = await confirmDialog({ title: `Remove ${fullName(person)}'s attendance?`, message: `They will no longer be counted as present on ${fmtDate(service.service_date, { short: true })}. The change is kept in the Sunday's log.`, confirmText: 'Remove mark', danger: true });
       if (!ok) return;
+    }
+    let reason = null;
+    if (correction()) {
+      const what = act === 'toggle' ? (person.att_status === 'present' ? `remove ${fullName(person)}'s mark` : `mark ${fullName(person)} present`) : `change ${fullName(person)}'s type`;
+      reason = await promptDialog({ title: 'Correction reason', message: `${fmtDate(service.service_date, { short: true })} is not today's Sunday. Why ${what}? This is saved in the audit log.`, placeholder: 'e.g. forgot to tap on Sunday / marked the wrong person', confirmText: 'Save correction' });
+      if (!reason) return;
     }
 
     if (pending.has(pid)) return; // a tap for this person is already in flight
@@ -216,8 +228,8 @@ export async function renderAttendance({ main, query }) {
     try {
       await ensureService();
       let res;
-      if (act === 'toggle') res = person.att_status === 'present' ? await api.undoMark(service.id, pid) : await api.mark(service.id, pid, 'present');
-      else if (act === 'toggleClass') res = await api.mark(service.id, pid, 'present', person.classification === 'first_timer' ? 'returning' : 'first_timer');
+      if (act === 'toggle') res = person.att_status === 'present' ? await api.undoMark(service.id, pid, reason) : await api.mark(service.id, pid, 'present', undefined, reason);
+      else if (act === 'toggleClass') res = await api.mark(service.id, pid, 'present', person.classification === 'first_timer' ? 'returning' : 'first_timer', reason);
       if (res.already_marked) toast(`${fullName(person)} is already marked present.`, 'info');
       Object.assign(service, res.summary);
       if (res.record) {
@@ -270,7 +282,7 @@ export async function renderAttendance({ main, query }) {
           if (!(await duplicateGuard(data, modal.querySelector('#quickDup')))) return;
           const person = await api.createPerson(data);
           await ensureService();
-          const res = await api.mark(service.id, person.id, 'present', 'first_timer');
+          const res = await api.mark(service.id, person.id, 'present', 'first_timer', correction() ? 'New first timer registered after Sunday' : undefined);
           closeModal();
           toast(`${fullName(person)} registered (${person.person_code}) and marked present.`);
           service.roster.push({ ...person, att_status: 'present', classification: 'first_timer', recorded_at: res.record.recorded_at, recorded_by: res.record.recorded_by_name, expected_classification: 'first_timer' });

@@ -8,6 +8,7 @@ const { getDb } = require('../db');
 const { wrap, HttpError } = require('../lib/util');
 const reg = require('../services/registrations');
 const { normalizeEmail, normalizeName, tidyName } = require('../lib/normalize');
+const prog = require('../services/lifegroup-progress');
 
 const router = express.Router();
 
@@ -38,17 +39,22 @@ router._resetRateLimit = () => buckets.clear(); // tests only
 
 router.use((req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next(); });
 
-// GET /api/public/register/options — pick-lists + enabled flag for the form
-router.get('/register/options', rateLimit('options', 120), wrap((req, res) => {
-  res.json(reg.publicOptions(getDb()));
+// GET /api/public/register/options?k=TOKEN — pick-lists + open/closed state for the form.
+// Also mints the signed device cookie (one registration per phone) and a form token (timing + origin proof).
+router.get('/register/options', rateLimit('options', 300), wrap((req, res) => {
+  const db = getDb();
+  const deviceId = reg.guard.device(db, req, res);
+  res.json(reg.publicOptions(db, { token: req.query.k, device_id: deviceId }));
 }));
 
 // POST /api/public/register/check { full_name, email } → booleans only (pre-submit hint)
 router.post('/register/check', rateLimit('check', SUBMIT_MAX * 4), wrap((req, res) => {
   const db = getDb();
-  if (!reg.on(reg.settings(db).qr_registration_enabled)) throw new HttpError(403, 'Registration is currently unavailable.');
+  const s = reg.settings(db);
+  const st = reg.guard.status(db, s, { token: req.body?.qr_token });
+  if (!st.open) throw new HttpError(403, st.message, { reason: st.reason });
   const d = reg.duplicates(db, { email_normalized: normalizeEmail(req.body?.email), full_name_normalized: normalizeName(tidyName(req.body?.full_name)) });
-  res.json({ email_taken: d.email_taken, name_match: reg.on(reg.settings(db).qr_name_duplicate_check) && d.name_match });
+  res.json({ email_taken: d.email_taken, name_match: reg.on(s.qr_name_duplicate_check) && d.name_match });
 }));
 
 // POST /api/public/register — the actual submission
@@ -57,8 +63,52 @@ router.post('/register', rateLimit('submit', SUBMIT_MAX), wrap((req, res) => {
   if (body.website) { // honeypot field — real people never fill it
     return res.status(201).json({ ok: true, ref_code: 'LG-0000-000000', status: 'pending' });
   }
-  const result = reg.submit(body, { ip: req.ip, userAgent: req.headers['user-agent'] });
+  const db = getDb();
+  const deviceId = reg.guard.device(db, req, res);
+  const result = reg.submit(body, { ip: req.ip, userAgent: req.headers['user-agent'], deviceId, token: body.qr_token });
   res.status(201).json({ ok: true, ...result });
+}));
+
+// ---------------------------------------------------------------------------
+// Leader report link: /lifegroup?t=TOKEN → these endpoints. The token is the group's private key;
+// no login. Only first/last names of the group's own members are exposed — never contact details.
+// ---------------------------------------------------------------------------
+function groupOr404(token) {
+  const g = prog.groupByToken(getDb(), token);
+  if (!g) throw new HttpError(404, 'This Lifegroup link is not valid anymore. Please ask the Lifegen admin for a new link.');
+  return g;
+}
+const pubMember = (m) => ({ id: m.id, name: `${m.first_name} ${m.last_name}`, tier: m.tier, role: m.role, meetings_attended: m.meetings_attended, last_meeting_attended: m.last_meeting_attended });
+
+router.get('/lifegroup/:token', rateLimit('lg-get', 240), wrap((req, res) => {
+  const db = getDb();
+  const g = groupOr404(req.params.token);
+  const p = prog.progress(db, g.id, { weeks: 8 });
+  const s = prog.settings(db);
+  res.json({
+    group: { id: g.id, name: g.name, gender: g.gender, leader_name: g.leader_display, schedule_day: g.schedule_day, schedule_time: g.schedule_time, venue: g.venue },
+    church_name: s.church_name, today: prog.churchToday(db, s), target: p.target, solid: p.solid, new_members: p.new_members, total: p.total, is_solid: p.is_solid, percent: p.percent,
+    streak: p.streak, held_last_4: p.held_last_4, met_this_week: p.met_this_week, last_meeting: p.last_meeting,
+    members: p.members.map(pubMember), calendar: p.calendar,
+    recent: prog.meetingsOf(db, g.id, 8).map((m) => ({ id: m.id, meeting_date: m.meeting_date, held: Boolean(m.held), present_count: m.present_count, topic: m.topic, no_meeting_reason: m.no_meeting_reason, present: m.present.map((x) => x.name) })),
+  });
+}));
+
+router.post('/lifegroup/:token/report', rateLimit('lg-report', 60), wrap((req, res) => {
+  const db = getDb();
+  const g = groupOr404(req.params.token);
+  const out = prog.recordMeeting(db, g.id, req.body || {}, { via: 'leader_link', byName: g.leader_display || 'leader' });
+  const p = prog.progress(db, g.id, { weeks: 8 });
+  res.status(out.updated ? 200 : 201).json({ ok: true, ...out, solid: p.solid, new_members: p.new_members, total: p.total, target: p.target, is_solid: p.is_solid, streak: p.streak, members: p.members.map(pubMember), calendar: p.calendar });
+}));
+
+router.put('/lifegroup/:token/members/:personId/tier', rateLimit('lg-tier', 120), wrap((req, res) => {
+  const db = getDb();
+  const g = groupOr404(req.params.token);
+  const pid = Number(req.params.personId);
+  prog.setTier(db, g.id, pid, String(req.body?.tier || ''), { via: 'leader_link', byName: g.leader_display || 'leader' });
+  const p = prog.progress(db, g.id, { weeks: 8 });
+  res.json({ ok: true, solid: p.solid, new_members: p.new_members, total: p.total, target: p.target, is_solid: p.is_solid, members: p.members.map(pubMember) });
 }));
 
 module.exports = router;

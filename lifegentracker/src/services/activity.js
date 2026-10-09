@@ -32,7 +32,7 @@ function recent(db, { limit = 100 } = {}) {
                                 WHEN 'undo' THEN 'mark removed'
                                 ELSE 'changed ' || COALESCE(x.old_status, '-') || '/' || COALESCE(x.old_classification, '-') ||
                                      ' → ' || COALESCE(x.new_status, '-') || '/' || COALESCE(x.new_classification, '-') END ||
-                  ' (' || s.service_date || ')' AS summary,
+                  ' (' || s.service_date || ')' || CASE WHEN x.reason IS NOT NULL AND x.reason <> '' THEN ' — correction: ' || x.reason ELSE '' END AS summary,
                 u.display_name AS user_name, 'attendance' AS source
            FROM attendance_audit x
            LEFT JOIN users u ON u.id = x.user_id

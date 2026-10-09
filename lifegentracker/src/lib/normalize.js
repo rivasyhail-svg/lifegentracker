@@ -5,13 +5,26 @@
  */
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
+/**
+ * Canonical form used for the "one Gmail = one registration" rule: lower-case, trimmed, and the tricks
+ * that give the same inbox a different spelling are removed — "+tag" on any domain, dots in the local
+ * part on Gmail, googlemail.com → gmail.com. The displayed email keeps what the person typed.
+ */
 function normalizeEmail(v) {
-  const s = String(v ?? '').trim().toLowerCase();
-  return s || null;
+  let s = String(v ?? '').trim().toLowerCase();
+  if (!s) return null;
+  const at = s.lastIndexOf('@');
+  if (at <= 0) return s;
+  let local = s.slice(0, at), domain = s.slice(at + 1);
+  if (domain === 'googlemail.com') domain = 'gmail.com';
+  const plus = local.indexOf('+');
+  if (plus > 0) local = local.slice(0, plus);
+  if (domain === 'gmail.com') local = local.replace(/\./g, '');
+  return `${local}@${domain}`;
 }
 function isValidEmail(v) {
-  const s = normalizeEmail(v);
-  return Boolean(s && s.length <= 254 && EMAIL_RE.test(s));
+  const s = String(v ?? '').trim().toLowerCase();
+  return Boolean(s && s.length <= 254 && EMAIL_RE.test(s) && !s.includes('..') && normalizeEmail(s).split('@')[0].length >= 1);
 }
 /** "  Juan   Dela-Cruz. " → "juan dela cruz" (case, spaces, punctuation and accents ignored) */
 function normalizeName(v) {

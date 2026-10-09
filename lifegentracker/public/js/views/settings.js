@@ -12,6 +12,7 @@ export async function renderSettings({ main }) {
       <div class="stack">
         <div class="card" id="accountCard"></div>
         ${admin ? raw('<div class="card" id="churchCard"></div>') : ''}
+        ${admin ? raw('<div class="card" id="rulesCard"></div>') : ''}
         ${admin ? raw('<div class="card" id="qrCard"></div>') : ''}
         ${admin ? raw('<div class="card" id="backupCard"></div>') : ''}
         ${admin ? raw('<div class="card" id="demoCard"></div>') : ''}
@@ -82,6 +83,28 @@ export async function renderSettings({ main }) {
         Object.assign(state.settings, s);
         document.querySelector('.sidebar .brand__text small').textContent = s.church_name;
         toast('Church details saved.');
+      } catch (err) { toast(err.message, 'error'); }
+    });
+  };
+
+  // ----- Attendance & Lifegroup rules ---------------------------------------
+  const rules = main.querySelector('#rulesCard');
+  const lockOn = state.settings.attendance_sunday_lock !== '0';
+  rules.innerHTML = html`
+    <div class="card__header"><h2>Attendance &amp; Lifegroup rules</h2></div>
+    <div class="card__body"><form id="rulesForm" class="form-grid" novalidate>
+      <div class="field span-2"><label class="toggle"><input type="checkbox" name="attendance_sunday_lock" ${lockOn ? 'checked' : ''} ${state.standalone ? 'disabled' : ''} /> Sunday-only attendance marking${state.standalone ? ' <span class="badge badge--nodot">Server only</span>' : ''}</label>
+        <span class="help">On: PRESENT can be tapped only on the actual Sunday (Philippine time). Past Sundays can be corrected by <b>Admins only</b>, and every correction asks for a reason that is kept in the audit log. Off: staff may mark any Sunday.</span></div>
+      <div class="field"><label>Solid Lifegroup target</label><input name="lifegroup_solid_target" type="number" min="1" max="50" value="${state.settings.lifegroup_solid_target || '6'}" required /><span class="help">A Lifegroup counts as <b>solid</b> once it has this many members tagged Solid.</span></div>
+      <div class="span-2 form-actions"><button class="btn btn--primary" type="submit">Save</button></div>
+    </form></div>`;
+  rules.querySelector('#rulesForm').onsubmit = async (e) => {
+    e.preventDefault();
+    await withLoading(e.target.querySelector('button[type=submit]'), async () => {
+      try {
+        const s = await api.saveSettings({ attendance_sunday_lock: e.target.attendance_sunday_lock.checked ? '1' : '0', lifegroup_solid_target: e.target.lifegroup_solid_target.value.trim() });
+        Object.assign(state.settings, s);
+        toast('Rules saved.');
       } catch (err) { toast(err.message, 'error'); }
     });
   };

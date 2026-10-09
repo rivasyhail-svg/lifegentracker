@@ -5,6 +5,7 @@ const { getDb } = require('../db');
 const { clean, isSunday, HttpError, wrap, intId } = require('../lib/util');
 const { requirePermission, can } = require('../middleware/auth');
 const stats = require('../services/stats');
+const guard = require('../services/qrguard');
 
 const router = express.Router();
 const SERVICE_TYPE = 'lifegen';
@@ -73,6 +74,34 @@ router.get(
   })
 );
 
+
+// ---------------------------------------------------------------------------
+// Sunday lock: staff may mark attendance only on the Sunday itself (church time).
+// Any other day/date is a *correction*: Admin only, reason required, kept in the audit.
+// ---------------------------------------------------------------------------
+function lockState(db, user, serviceDate) {
+  const s = {};
+  for (const r of db.prepare("SELECT key, value FROM settings WHERE key IN ('attendance_sunday_lock', 'qr_timezone')").all()) s[r.key] = r.value;
+  const enabled = s.attendance_sunday_lock !== '0';
+  const now = guard.churchNow(s.qr_timezone || 'Asia/Manila');
+  const live = now.dow === 0 && now.date === serviceDate;
+  const admin = can(user, 'settings:manage');
+  return {
+    enabled, live: !enabled || live, can_correct: admin, church_date: now.date, church_day: guard.DAY_NAMES[now.dow],
+    message: enabled && !live ? (admin ? 'Correction mode — this is not today\'s Sunday, so every change needs a reason and is logged.'
+      : `Attendance can only be marked on the Sunday itself (church time: ${guard.DAY_NAMES[now.dow]} ${now.date}). Past Sundays can be corrected by an Admin.`) : '',
+  };
+}
+/** Throws unless the user may change `serviceDate` now; returns the correction reason (null when live). */
+function requireEditable(db, req, serviceDate, reasonRaw) {
+  const st = lockState(db, req.user, serviceDate);
+  if (st.live) return null;
+  if (!st.can_correct) throw new HttpError(403, st.message);
+  const reason = clean(reasonRaw);
+  if (!reason) throw new HttpError(400, 'Please give a reason for this correction (e.g. "forgot to tap on Sunday").', { reason: 'required' });
+  return reason.slice(0, 200);
+}
+
 // GET /api/services/by-date/:date  → { exists, service? }
 router.get(
   '/by-date/:date',
@@ -82,8 +111,9 @@ router.get(
     const date = req.params.date;
     if (!isSunday(date)) throw new HttpError(400, 'Lifegen attendance is Sunday only — please choose a Sunday.');
     const row = db.prepare('SELECT id FROM services WHERE service_date = ? AND service_type = ?').get(date, SERVICE_TYPE);
-    if (!row) return res.json({ exists: false, service_date: date });
-    res.json({ exists: true, service: stats.serviceSummary(db, row.id) });
+    const lock = lockState(db, req.user, date);
+    if (!row) return res.json({ exists: false, service_date: date, lock });
+    res.json({ exists: true, service: stats.serviceSummary(db, row.id), lock });
   })
 );
 
@@ -134,6 +164,8 @@ router.post(
     if (!isSunday(date)) throw new HttpError(400, 'Lifegen attendance is Sunday only — please choose a Sunday.');
     const dup = db.prepare('SELECT id FROM services WHERE service_date = ? AND service_type = ?').get(date, SERVICE_TYPE);
     if (dup) return res.json(stats.serviceSummary(db, dup.id));
+    const st = lockState(db, req.user, date);
+    if (!st.live && !st.can_correct) throw new HttpError(403, st.message);
     const info = db
       .prepare('INSERT INTO services (service_date, service_type, notes, created_by) VALUES (?, ?, ?, ?)')
       .run(date, SERVICE_TYPE, clean(req.body?.notes), req.user.id);
@@ -182,6 +214,7 @@ router.put(
 
     const status = clean(req.body?.status);
     if (!['present', 'absent'].includes(status)) throw new HttpError(400, 'Status must be present or absent.');
+    const reason = requireEditable(db, req, service.service_date, req.body?.reason);
     let classification = clean(req.body?.classification);
     if (classification && !['first_timer', 'returning'].includes(classification)) throw new HttpError(400, 'Invalid classification.');
 
@@ -222,10 +255,10 @@ router.put(
       }
       db.prepare(
         `INSERT INTO attendance_audit (service_id, person_id, action, old_status, new_status,
-                                       old_classification, new_classification, user_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+                                       old_classification, new_classification, user_id, reason)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(service.id, person.id, existing ? 'update' : 'mark', existing?.status || null, status,
-            existing?.classification || null, classification, req.user.id);
+            existing?.classification || null, classification, req.user.id, reason);
 
       // First attendance bookkeeping
       if (status === 'present') {
@@ -252,13 +285,15 @@ router.delete(
       .prepare('SELECT * FROM attendance_records WHERE service_id = ? AND person_id = ?')
       .get(intId(req.params.id), intId(req.params.personId, 'person id'));
     if (!existing) throw new HttpError(404, 'No attendance record to undo.');
+    const svcDate = db.prepare('SELECT service_date FROM services WHERE id = ?').get(existing.service_id).service_date;
+    const reason = requireEditable(db, req, svcDate, req.query.reason ?? req.body?.reason);
     db.transaction(() => {
       db.prepare('DELETE FROM attendance_records WHERE id = ?').run(existing.id);
       db.prepare(
         `INSERT INTO attendance_audit (service_id, person_id, action, old_status, new_status,
-                                       old_classification, new_classification, user_id)
-         VALUES (?, ?, 'undo', ?, NULL, ?, NULL, ?)`
-      ).run(existing.service_id, existing.person_id, existing.status, existing.classification, req.user.id);
+                                       old_classification, new_classification, user_id, reason)
+         VALUES (?, ?, 'undo', ?, NULL, ?, NULL, ?, ?)`
+      ).run(existing.service_id, existing.person_id, existing.status, existing.classification, req.user.id, reason);
       if (existing.status === 'present') {
         const svc = db.prepare('SELECT service_date FROM services WHERE id = ?').get(existing.service_id);
         rollbackFirstAttended(db, existing.person_id, svc.service_date);

@@ -8,6 +8,9 @@ const { getDb } = require('../db');
 const { clean, isValidDate, today, HttpError, wrap, intId } = require('../lib/util');
 const { requirePermission, can } = require('../middleware/auth');
 const activity = require('../services/activity');
+const { syncNetworks } = require('../services/networks-auto');
+const prog = require('../services/lifegroup-progress');
+const QRCode = require('qrcode');
 
 const router = express.Router();
 const DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
@@ -20,7 +23,10 @@ const GROUP_SELECT = `
          n.name AS network_name, n.leader_person_id AS network_leader_person_id,
          COALESCE(nl.first_name || ' ' || nl.last_name, n.leader_name) AS network_leader_name,
          (SELECT COUNT(*) FROM lifegroup_memberships m JOIN people p ON p.id = m.person_id
-           WHERE m.lifegroup_id = g.id AND m.left_at IS NULL AND p.archived_at IS NULL) AS member_count
+           WHERE m.lifegroup_id = g.id AND m.left_at IS NULL AND p.archived_at IS NULL) AS member_count,
+         (SELECT COUNT(*) FROM lifegroup_memberships m JOIN people p ON p.id = m.person_id
+           WHERE m.lifegroup_id = g.id AND m.left_at IS NULL AND p.archived_at IS NULL AND m.tier = 'solid') AS solid_count,
+         (SELECT MAX(mt.meeting_date) FROM lifegroup_meetings mt WHERE mt.lifegroup_id = g.id AND mt.held = 1) AS last_held
     FROM lifegroups g
     LEFT JOIN people lp ON lp.id = g.leader_person_id
     LEFT JOIN networks n ON n.id = g.network_id
@@ -45,6 +51,7 @@ function shape(g, user) {
   };
   if (!can(user, 'people:view_private')) out.leader_contact = undefined;
   delete out.leader_first_name; delete out.leader_last_name;
+  delete out.report_token; // private leader link — only via /:id/progress for managers
   return out;
 }
 
@@ -60,6 +67,8 @@ function validateGroup(body, existing = null) {
     leader_person_id: src.leader_person_id ? Number(src.leader_person_id) : null,
     leader_name: clean(src.leader_name),
     network_id: src.network_id ? Number(src.network_id) : null,
+    // a network chosen by hand is pinned; "Auto" (no network_id, or network_manual=false) lets membership decide
+    network_manual: src.network_id && (body.network_manual === undefined ? (body.network_id !== undefined ? true : Boolean(src.network_manual)) : Boolean(body.network_manual)) ? 1 : 0,
     network: clean(src.network),
     area: clean(src.area),
     schedule_day: clean(src.schedule_day),
@@ -165,7 +174,8 @@ router.get('/', requirePermission('lifegroups:view'), wrap((req, res) => {
   if (status === 'active') where.push('g.is_active = 1');
   else if (status === 'inactive') where.push('g.is_active = 0');
   const rows = db.prepare(`${GROUP_SELECT} ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY g.is_active DESC, g.area COLLATE NOCASE, g.name COLLATE NOCASE`).all(params);
-  res.json(rows.map((g) => shape(g, req.user)));
+  const solidTarget = prog.target(prog.settings(db));
+  res.json(rows.map((g) => ({ ...shape(g, req.user), solid_target: solidTarget })));
 }));
 
 // GET /api/lifegroups/options — areas / categories / networks for dropdowns
@@ -232,13 +242,69 @@ router.get('/recommend', requirePermission('lifegroups:view'), wrap((req, res) =
   res.json({ prefs, groups: recommend(db, prefs, req.user) });
 }));
 
+// ---------------------------------------------------------------------------
+// Progress: solid/new members, weekly reports, leader link, statistics
+// ---------------------------------------------------------------------------
+// GET /api/lifegroups/progress/overview — Progress tab (all groups, per network, overall)
+router.get('/progress/overview', requirePermission('lifegroups:view'), wrap((req, res) => {
+  res.json(prog.overview(getDb(), { weeks: Math.min(Math.max(Number(req.query.weeks) || 8, 4), 26) }));
+}));
+
+// GET /api/lifegroups/:id/progress — one group: members with tiers, calendar, meetings, leader link (managers only)
+function linkBase(db, req) {
+  const proto = req.headers['x-forwarded-proto'] || req.protocol;
+  const custom = clean(db.prepare("SELECT value FROM settings WHERE key = 'qr_public_url'").get()?.value);
+  return custom ? custom.replace(/\/+$/, '').replace(/\/register$/, '') : `${proto}://${req.get('host')}`;
+}
+router.get('/:id/progress', requirePermission('lifegroups:view'), wrap(async (req, res) => {
+  const db = getDb();
+  const id = intId(req.params.id);
+  const p = prog.progress(db, id, { weeks: Math.min(Math.max(Number(req.query.weeks) || 12, 4), 26) });
+  const out = { ...p, meetings: prog.meetingsOf(db, id, 30) };
+  if (can(req.user, 'lifegroups:manage')) {
+    const token = prog.ensureToken(db, id);
+    out.report_link = `${linkBase(db, req)}/lifegroup?t=${token}`;
+    out.report_qr = await QRCode.toString(out.report_link, { type: 'svg', errorCorrectionLevel: 'M', margin: 1, color: { dark: '#111111', light: '#ffffff' } });
+  }
+  res.json(out);
+}));
+
+// PUT /api/lifegroups/:id/members/:personId/tier { tier: 'solid' | 'new' }
+router.put('/:id/members/:personId/tier', requirePermission('lifegroups:manage'), wrap((req, res) => {
+  const db = getDb();
+  const id = intId(req.params.id);
+  prog.setTier(db, id, intId(req.params.personId, 'person id'), clean(req.body?.tier), { user: req.user });
+  res.json(prog.progress(db, id));
+}));
+
+// POST /api/lifegroups/:id/meetings — staff files/overwrites the report for a date
+router.post('/:id/meetings', requirePermission('lifegroups:manage'), wrap((req, res) => {
+  const db = getDb();
+  const id = intId(req.params.id);
+  const out = prog.recordMeeting(db, id, req.body || {}, { via: 'admin', user: req.user, byName: req.user.display_name });
+  res.status(out.updated ? 200 : 201).json({ ...out, progress: prog.progress(db, id), meetings: prog.meetingsOf(db, id, 30) });
+}));
+router.delete('/:id/meetings/:mid', requirePermission('lifegroups:manage'), wrap((req, res) => {
+  const db = getDb();
+  const id = intId(req.params.id);
+  prog.deleteMeeting(db, id, intId(req.params.mid, 'meeting id'), req.user);
+  res.json({ progress: prog.progress(db, id), meetings: prog.meetingsOf(db, id, 30) });
+}));
+// POST /api/lifegroups/:id/report-link/reset — invalidate the leader's link
+router.post('/:id/report-link/reset', requirePermission('lifegroups:manage'), wrap((req, res) => {
+  const db = getDb();
+  const id = intId(req.params.id);
+  const token = prog.resetToken(db, id, req.user);
+  res.json({ report_link: `${linkBase(db, req)}/lifegroup?t=${token}` });
+}));
+
 // GET /api/lifegroups/:id — group + current members + leader
 router.get('/:id', requirePermission('lifegroups:view'), wrap((req, res) => {
   const db = getDb();
   const g = getGroup(db, intId(req.params.id), req.user);
   if (!g) throw new HttpError(404, 'Lifegroup not found.');
   const members = db.prepare(`
-    SELECT p.id, p.person_code, p.first_name, p.last_name, p.photo, p.sex, p.status, p.archived_at, m.role, m.joined_at, m.id AS membership_id,
+    SELECT p.id, p.person_code, p.first_name, p.last_name, p.photo, p.sex, p.status, p.archived_at, m.role, m.tier, m.joined_at, m.id AS membership_id,
            (SELECT MAX(s.service_date) FROM attendance_records r JOIN services s ON s.id = r.service_id WHERE r.person_id = p.id AND r.status = 'present') AS last_attended
       FROM lifegroup_memberships m JOIN people p ON p.id = m.person_id
      WHERE m.lifegroup_id = ? AND m.left_at IS NULL
@@ -257,8 +323,9 @@ router.post('/', requirePermission('lifegroups:manage'), wrap((req, res) => {
   if (data.leader_person_id && !db.prepare('SELECT 1 FROM people WHERE id = ?').get(data.leader_person_id)) throw new HttpError(400, 'Leader must be a registered person.');
   if (data.network_id && !db.prepare('SELECT 1 FROM networks WHERE id = ?').get(data.network_id)) throw new HttpError(400, 'Network not found.');
   checkGenderRules(db, data);
-  const info = db.prepare(`INSERT INTO lifegroups (name, gender, leader_person_id, leader_name, network_id, network, area, schedule_day, schedule_time, category, capacity, venue, notes, is_active, created_by)
-    VALUES (@name, @gender, @leader_person_id, @leader_name, @network_id, @network, @area, @schedule_day, @schedule_time, @category, @capacity, @venue, @notes, @is_active, @created_by)`).run({ ...data, created_by: req.user.id });
+  const info = db.prepare(`INSERT INTO lifegroups (name, gender, leader_person_id, leader_name, network_id, network_manual, network, area, schedule_day, schedule_time, category, capacity, venue, notes, is_active, created_by)
+    VALUES (@name, @gender, @leader_person_id, @leader_name, @network_id, @network_manual, @network, @area, @schedule_day, @schedule_time, @category, @capacity, @venue, @notes, @is_active, @created_by)`).run({ ...data, created_by: req.user.id });
+  syncNetworks(db, req.user);
   const g = getGroup(db, info.lastInsertRowid, req.user);
   activity.log(db, req.user, 'lifegroup.create', 'lifegroup', g.id, `Created Lifegroup ${g.name}${g.leader_name ? ' (leader ' + g.leader_name + ')' : ''}`);
   res.status(201).json(g);
@@ -274,9 +341,10 @@ router.put('/:id', requirePermission('lifegroups:manage'), wrap((req, res) => {
   if (data.leader_person_id && !db.prepare('SELECT 1 FROM people WHERE id = ?').get(data.leader_person_id)) throw new HttpError(400, 'Leader must be a registered person.');
   if (data.network_id && !db.prepare('SELECT 1 FROM networks WHERE id = ?').get(data.network_id)) throw new HttpError(400, 'Network not found.');
   checkGenderRules(db, data, id);
-  db.prepare(`UPDATE lifegroups SET name=@name, gender=@gender, leader_person_id=@leader_person_id, leader_name=@leader_name, network_id=@network_id, network=@network, area=@area,
+  db.prepare(`UPDATE lifegroups SET name=@name, gender=@gender, leader_person_id=@leader_person_id, leader_name=@leader_name, network_id=@network_id, network_manual=@network_manual, network=@network, area=@area,
       schedule_day=@schedule_day, schedule_time=@schedule_time, category=@category, capacity=@capacity, venue=@venue, notes=@notes,
       is_active=@is_active, updated_at=datetime('now') WHERE id=@id`).run({ ...data, id });
+  syncNetworks(db, req.user);
   const changed = Object.keys(data).filter((k) => (existing[k] ?? null) !== (data[k] ?? null));
   activity.log(db, req.user, 'lifegroup.update', 'lifegroup', id, `Edited Lifegroup ${data.name}${changed.length ? ': ' + changed.join(', ') : ''}`);
   res.json(getGroup(db, id, req.user));
@@ -321,6 +389,7 @@ function assign(db, user, { personId, groupId, joinedAt, role, notes }) {
   })();
   const prev = cur ? db.prepare('SELECT name FROM lifegroups WHERE id = ?').get(cur.lifegroup_id)?.name : null;
   activity.log(db, user, 'lifegroup.assign', 'person', p.id, `${p.first_name} ${p.last_name} (${p.person_code}) ${prev ? `moved from ${prev} to` : 'joined'} ${g.name}`);
+  syncNetworks(db, user);
   return { person: p, group: g, unchanged: false };
 }
 
@@ -343,6 +412,7 @@ router.delete('/:id/members/:personId', requirePermission('lifegroups:manage'), 
   db.prepare('UPDATE lifegroup_memberships SET left_at = ? WHERE id = ?').run(date, cur.id);
   const p = db.prepare('SELECT first_name, last_name, person_code FROM people WHERE id = ?').get(personId);
   activity.log(db, req.user, 'lifegroup.leave', 'person', personId, `${p.first_name} ${p.last_name} (${p.person_code}) left ${cur.name}`);
+  syncNetworks(db, req.user);
   res.json(membershipFor(db, personId, req.user));
 }));
 

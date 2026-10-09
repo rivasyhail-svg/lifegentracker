@@ -902,3 +902,20 @@ details[open] > summary .t-open { display: none; } details:not([open]) > summary
   body.printing-poster .qr-poster h1 { font-size: 64pt; }
   body.printing-poster .qr-poster__code { width: 120mm; }
 }
+
+/* --- Lifegroup progress: week cells, checklists, grids ----------------- */
+.wk { display: flex; gap: 4px; flex-wrap: wrap; }
+.wk__c { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 4px; font-size: .68rem; font-weight: 600; border: 1px solid var(--border); background: #fff; color: var(--muted); vertical-align: middle; }
+.wk--md .wk__c, .wk__c--md { width: 26px; height: 26px; font-size: .74rem; }
+.wk__c--held { background: var(--green-100); border-color: #bbf7d0; color: #14532d; }
+.wk__c--skip { background: var(--amber-100); border-color: #fde68a; color: #78350f; }
+.wk__c--none { background: var(--ink-100, #f3f4f6); border-style: dashed; }
+.wk__c--key { width: 12px; height: 12px; margin: 0 2px 0 8px; }
+.wk__c--key:first-child { margin-left: 0; }
+.checklist { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 6px; }
+.checklist__item { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: .9rem; cursor: pointer; background: #fff; }
+.checklist__item:has(input:checked) { border-color: var(--brand-600); background: var(--brand-50, #f0fdfa); }
+.checklist__item input { width: 16px; height: 16px; margin: 0; accent-color: var(--brand-600); }
+.checklist__item .badge { margin-left: auto; }
+.table--grid th.num, .table--grid td.num { text-align: center; padding-left: 4px; padding-right: 4px; }
+.table--grid th.small { font-weight: 500; white-space: nowrap; }
