@@ -29,7 +29,12 @@ const NET_SELECT = `
          (SELECT COUNT(*) FROM lifegroups g WHERE g.network_id = n.id AND g.is_active = 1 AND g.gender = 'boys') AS boys_groups,
          (SELECT COUNT(*) FROM lifegroups g WHERE g.network_id = n.id AND g.is_active = 1 AND g.gender = 'girls') AS girls_groups,
          (SELECT COUNT(DISTINCT COALESCE('p' || g.leader_person_id, 'n' || g.leader_name)) FROM lifegroups g
-           WHERE g.network_id = n.id AND g.is_active = 1 AND (g.leader_person_id IS NOT NULL OR g.leader_name IS NOT NULL)) AS leader_count
+           WHERE g.network_id = n.id AND g.is_active = 1 AND (g.leader_person_id IS NOT NULL OR g.leader_name IS NOT NULL)) AS leader_count,
+         (SELECT COUNT(*) FROM lifegroup_memberships m JOIN lifegroups g ON g.id = m.lifegroup_id JOIN people p ON p.id = m.person_id
+           WHERE n.leader_person_id IS NOT NULL AND g.leader_person_id = n.leader_person_id AND g.is_active = 1 AND m.left_at IS NULL AND p.archived_at IS NULL) AS cell_leaders,
+         (SELECT COUNT(*) FROM lifegroup_memberships m JOIN lifegroups g ON g.id = m.lifegroup_id JOIN people p ON p.id = m.person_id
+           WHERE g.network_id = n.id AND g.is_active = 1 AND m.left_at IS NULL AND p.archived_at IS NULL AND m.tier = 'solid') AS closed_cell,
+         (SELECT MAX(mt.meeting_date) FROM lifegroup_meetings mt JOIN lifegroups g ON g.id = mt.lifegroup_id WHERE g.network_id = n.id AND mt.held = 1) AS last_held
     FROM networks n
     LEFT JOIN people lp ON lp.id = n.leader_person_id
     LEFT JOIN networks pn ON pn.id = n.parent_network_id`;
@@ -37,6 +42,8 @@ const NET_SELECT = `
 function shape(n, user) {
   if (!n) return n;
   const out = { ...n, leader_name: n.leader_person_id ? `${n.lf} ${n.ll}` : n.leader_name };
+  for (const k of ['group_count', 'people_count', 'child_count', 'boys', 'girls', 'boys_groups', 'girls_groups', 'leader_count', 'cell_leaders', 'closed_cell']) if (out[k] != null) out[k] = Number(out[k]);
+  out.open_cell = Math.max(0, (out.people_count || 0) - (out.closed_cell || 0));
   if (!can(user, 'people:view_private')) out.leader_contact = undefined;
   delete out.lf; delete out.ll;
   return out;

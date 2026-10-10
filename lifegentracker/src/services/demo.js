@@ -95,10 +95,9 @@ function load(db, userId) {
     // Networks and groups are never mixed: a boys network holds boys groups (male leaders/members), a girls network girls groups.
     const males = people.filter((p) => p.sex === 'male'), females = people.filter((p) => p.sex === 'female');
     const insertNet = db.prepare(`INSERT INTO networks (name, gender, leader_person_id, parent_network_id, notes, is_demo, created_by) VALUES (?, ?, ?, ?, 'DEMO DATA', 1, ?)`);
-    const netBoys = insertNet.run('Demo Boys Network', 'boys', males[5].id, null, userId).lastInsertRowid;
-    const netGirls = insertNet.run('Demo Girls Network', 'girls', females[5].id, null, userId).lastInsertRowid;
-    const netA = insertNet.run('Demo Network A (boys)', 'boys', males[9].id, netBoys, userId).lastInsertRowid;
-    const netB = insertNet.run('Demo Network B (girls)', 'girls', females[9].id, netGirls, userId).lastInsertRowid;
+    // Every Network has the same shape: network leader → their Lifegroup (= the cell leaders) → each cell leader's own Lifegroup.
+    const netA = insertNet.run('Demo Network A (boys)', 'boys', males[9].id, null, userId).lastInsertRowid;
+    const netB = insertNet.run('Demo Network B (girls)', 'girls', females[9].id, null, userId).lastInsertRowid;
     const insertGroup = db.prepare(`INSERT INTO lifegroups (name, gender, leader_person_id, network_id, network_manual, network, area, schedule_day, schedule_time, category, capacity, venue, notes, is_demo, created_by)
       VALUES (@name, @gender, @leader, @network_id, 1, @network, @area, @day, @time, @category, @capacity, @venue, 'DEMO DATA', 1, @uid)`);
     const groups = [
@@ -108,30 +107,38 @@ function load(db, userId) {
       { name: 'Demo Esther Group', gender: 'girls', leader: females[10].id, network_id: netB, network: 'Demo Network B (girls)', area: 'Tungkong Mangga', day: 'fri', time: '19:30', category: 'Mixed', capacity: null, venue: 'Demo venue 4' },
     ].map((g) => insertGroup.run({ ...g, uid: userId }).lastInsertRowid);
     const [JOSHUA, RUTH, DAVID, ESTHER] = groups;
-    const leaderOf = new Map([[males[3].id, JOSHUA], [females[3].id, RUTH], [males[7].id, DAVID], [females[10].id, ESTHER]]);
+    // the network leaders' own Lifegroups: their members are the cell leaders (max 6)
+    const NET_A_LG = insertGroup.run({ name: 'Demo Network A Leaders', gender: 'boys', leader: males[9].id, network_id: null, network: null, area: 'Kaybanban', day: 'sun', time: '13:00', category: 'Leaders', capacity: null, venue: 'Demo venue 5', uid: userId }).lastInsertRowid;
+    const NET_B_LG = insertGroup.run({ name: 'Demo Network B Leaders', gender: 'girls', leader: females[9].id, network_id: null, network: null, area: 'Kaybanban', day: 'sun', time: '13:00', category: 'Leaders', capacity: null, venue: 'Demo venue 6', uid: userId }).lastInsertRowid;
+    const leaderOf = new Map([[males[3].id, JOSHUA], [females[3].id, RUTH], [males[7].id, DAVID], [females[10].id, ESTHER], [males[9].id, NET_A_LG], [females[9].id, NET_B_LG]]);
     const insertM = db.prepare("INSERT INTO lifegroup_memberships (person_id, lifegroup_id, role, tier, joined_at, left_at, assigned_by) VALUES (?, ?, ?, 'new', ?, ?, ?)");
+    const cellLeaderOf = new Map([[males[3].id, NET_A_LG], [males[7].id, NET_A_LG], [females[3].id, NET_B_LG], [females[10].id, NET_B_LG]]);
     const areas = ['Kaybanban', 'Muzon', 'Tungkong Mangga', 'Sapang Palay'];
     const setPref = db.prepare('UPDATE people SET preferred_area = ?, preferred_day = ?, preferred_time = ? WHERE id = ?');
     const mid = Math.floor(sundays.length / 2);
+    const placed = {};
     people.forEach((p, i) => {
       setPref.run(areas[i % areas.length], i % 3 ? 'sat' : 'fri', i % 2 ? 'evening' : 'afternoon', p.id);
-      if (leaderOf.has(p.id)) { insertM.run(p.id, leaderOf.get(p.id), 'leader', sundays[0], null, userId); return; }
-      if (i % 5 === 0) return; // stays unconnected → appears in "Needs Lifegroup"
-      const k = (p.sex === 'male' ? males : females).indexOf(p);
-      const g = p.sex === 'male' ? (k % 2 ? DAVID : JOSHUA) : (k % 2 ? ESTHER : RUTH);
+      if (cellLeaderOf.has(p.id)) { insertM.run(p.id, cellLeaderOf.get(p.id), 'member', sundays[0], null, userId); db.prepare("UPDATE lifegroup_memberships SET tier = 'solid' WHERE person_id = ? AND lifegroup_id = ?").run(p.id, cellLeaderOf.get(p.id)); return; }
+      if (leaderOf.has(p.id)) return; // network leaders lead their own Lifegroup; they are not members of another demo group
+      if (p === females[7] || p === females[11]) return; // stay unconnected → appear in "Needs Lifegroup"
       if (p === males[1]) { insertM.run(p.id, DAVID, 'member', sundays[0], sundays[mid], userId); insertM.run(p.id, JOSHUA, 'member', sundays[mid], null, userId); return; } // a move, kept in history
-      insertM.run(p.id, g, 'member', sundays[Math.min(p.joinIdx + 1, sundays.length - 1)], null, userId);
+      // alternate the rest between the two groups of their sex; Joshua gets two extra so the demo has one solid Lifegroup (6 closed)
+      const list = p.sex === 'male' ? [JOSHUA, DAVID] : [RUTH, ESTHER];
+      const c = (placed[p.sex] = (placed[p.sex] || 0) + 1);
+      const first = p.sex === 'male' ? c <= 2 || c % 2 === 1 : c % 2 === 1;
+      insertM.run(p.id, list[first ? 0 : 1], 'member', sundays[Math.min(p.joinIdx + 1, sundays.length - 1)], null, userId);
     });
     // Progress demo: some long-time members tagged Solid, and weekly meeting reports for the last 6 weeks.
     db.prepare(`UPDATE lifegroup_memberships SET tier = 'solid' WHERE left_at IS NULL AND lifegroup_id IN (${groups.join(',')})
-      AND person_id IN (SELECT id FROM people WHERE is_demo = 1 AND status IN ('member','leader','regular'))`).run();
+      AND person_id IN (SELECT id FROM people WHERE is_demo = 1 AND status IN ('member','leader'))`).run();
     db.prepare("UPDATE lifegroup_memberships SET tier = 'solid' WHERE left_at IS NULL AND lifegroup_id = ?").run(JOSHUA); // one solid Lifegroup in the demo
     const insertMeet = db.prepare(`INSERT OR IGNORE INTO lifegroup_meetings (lifegroup_id, meeting_date, held, no_meeting_reason, topic, notes, present_count, submitted_via, submitted_by_name)
       VALUES (?, ?, ?, ?, ?, 'DEMO DATA', ?, 'leader_link', 'Demo leader')`);
     const insertMA = db.prepare('INSERT OR IGNORE INTO lifegroup_meeting_attendance (meeting_id, person_id, present, devotion) VALUES (?, ?, 1, ?)');
     const topics = ['Prayer', 'Identity in Christ', 'Serving', 'Faith', 'Community', 'Generosity'];
-    const dayOffset = { sat: 6, fri: 5 };
-    groups.forEach((gid, gi) => {
+    const dayOffset = { sat: 6, fri: 5, sun: 7 };
+    [...groups, NET_A_LG, NET_B_LG].forEach((gid, gi) => {
       const g = db.prepare('SELECT schedule_day FROM lifegroups WHERE id = ?').get(gid);
       const mem = db.prepare('SELECT person_id FROM lifegroup_memberships WHERE lifegroup_id = ? AND left_at IS NULL').all(gid).map((r) => r.person_id);
       for (let w = 6; w >= 1; w -= 1) {

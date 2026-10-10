@@ -53,7 +53,7 @@ function cellLeadersView() {
   const rows = d.members.map((m) => ({ id: m.id, name: m.name, last4: m.last4, group: byLeader.get(m.id) || null }));
   for (const g of net.groups) if (!rows.some((r) => r.id === g.leader_person_id)) rows.push({ id: g.leader_person_id || `g${g.id}`, name: g.leader_name || g.name, last4: null, group: g });
   const cell = (g, tier, list) => `<section class="cell cell--${tier === 'solid' ? 'closed' : 'open'}">
-      <header class="cell__head"><b>${TIER[tier]}</b> <span class="muted">· ${list.length}</span></header>
+      <header class="cell__head"><b>${TIER[tier]}</b> <span class="muted">· ${list.length}${tier === 'solid' ? ` / ${g.target}` : ''}</span><span class="small muted cell__hint">${tier === 'solid' ? (list.length >= g.target ? 'solid Lifegroup ✓' : `max ${g.target} = solid`) : 'walang limit'}</span></header>
       <div style="padding:2px 10px 6px">${memberRows(list, { tapTier: true, groupId: g.id })}</div>
     </section>`;
   const heldBadge = (g) => !g ? '' : g.this_week === 'held' ? '<span class="badge badge--present badge--nodot cl__held">Held LG</span>' : g.this_week === 'skip' ? '<span class="badge badge--absent badge--nodot cl__held">No LG</span>' : '<span class="badge badge--nodot cl__held">No report</span>';
@@ -62,7 +62,7 @@ function cellLeadersView() {
   const item = (r) => `<details class="cl">
       <summary class="cl__sum"><span class="cl__name">${esc(r.name)}</span>${heldBadge(r.group)}${r.last4 ? dots(r.last4) : '<span class="small muted">—</span>'}</summary>
       ${r.group ? `<div style="padding:6px 12px 0">
-          <div class="small muted">${esc(r.group.name)} · ${r.group.total} member${r.group.total === 1 ? '' : 's'} · ${r.group.solid}/${r.group.target} closed cell</div>
+          <div class="small muted">${esc(r.group.name)} · ${r.group.total} member${r.group.total === 1 ? '' : 's'} · Closed cell ${r.group.solid} / ${r.group.target}${r.group.solid >= r.group.target ? ' (solid ✓)' : ''} · Open cell ${r.group.total - r.group.solid}</div>
           <div class="row row--between mt-1" style="gap:8px;align-items:center"><span class="small"><b>Their Lifegroup</b> · ${r.group.held_last_4}/4 held</span>${strip(r.group)}</div>
           <div class="small mt-1"><b>Who was present</b></div>${recent(r.group)}
         </div>
@@ -71,10 +71,31 @@ function cellLeadersView() {
     </details>`;
   return `
     <section class="card reg-card" style="padding:0;overflow:hidden">
-      <div class="row row--between" style="padding:14px 16px 10px"><b>My cell leaders</b><span class="small muted">${rows.length}${d.max_members ? ` / ${d.max_members}` : ''} · ${net.summary.met_this_week}/${net.summary.groups} met this week</span></div>
+      <div class="row row--between" style="padding:14px 16px 10px"><b>My cell leaders</b><span class="small muted">${rows.length}${d.max_members ? ` / ${d.max_members} (max ${d.max_members})` : ''} · ${net.summary.met_this_week}/${net.summary.groups} met this week</span></div>
       <p class="small muted" style="margin:0 16px 10px">Dots = present in <b>your</b> Lifegroup, last 4 weeks. Badge = did they hold <b>their</b> Lifegroup this week. Tap a name for who was present and their Open / Closed cell.</p>
       ${rows.length ? rows.map(item).join('') : '<p class="small muted" style="padding:0 16px 14px">No cell leaders yet — add them with “New person this week” in your Weekly report.</p>'}
     </section>`;
+}
+
+/** The church structure, always visible so the leader knows the limits:
+ *  Network leader → max 6 cell leaders → each: Closed cell max 6 (= solid Lifegroup) + Open cell (no limit). */
+function structureStrip() {
+  const net = d.network;
+  const t = d.target || 6;
+  const max = d.max_members || 6;
+  const solid = d.members.filter((m) => m.tier === 'solid').length;
+  if (net) {
+    const full = d.members.length >= max;
+    return `<section class="card reg-card struct" aria-label="Structure">
+      <div class="struct__row"><span class="struct__tag">Network leader</span><b>${esc(d.group.leader_name || 'You')}</b></div>
+      <div class="struct__row struct__row--in"><span class="struct__tag">Cell leaders</span><b class="${full ? 'struct__full' : ''}">${d.members.length} / ${max}</b><span class="small muted">max ${max} — ${full ? 'puno na, bawal pang-' + (max + 1) : 'bawal pang-' + (max + 1)}</span></div>
+      <div class="struct__row struct__row--in2"><span class="struct__tag">Each cell leader</span><span class="small"><b>Closed cell</b> max ${t} <span class="muted">(= solid Lifegroup)</span> + <b>Open cell</b> / new members <span class="muted">(walang limit)</span></span></div>
+    </section>`;
+  }
+  return `<section class="card reg-card struct" aria-label="Structure">
+    <div class="struct__row"><span class="struct__tag">Closed cell</span><b class="${solid >= t ? 'struct__ok' : ''}">${solid} / ${t}</b><span class="small muted">max ${t} — ${solid >= t ? 'solid Lifegroup ✓' : t + ' = solid Lifegroup'}</span></div>
+    <div class="struct__row"><span class="struct__tag">Open cell</span><b>${d.members.length - solid}</b><span class="small muted">new members · walang limit</span></div>
+  </section>`;
 }
 
 function render() {
@@ -115,15 +136,19 @@ function render() {
         ${!d.members.length ? '<p class="small muted">No members yet — add your first members below.</p>' : ''}
         <div class="newbies mt-1">
           ${draft.newbies.map((n, i) => `<div class="chip chip--on chip--new"><span class="chip__main"><span class="chip__check"></span><span class="chip__name">${esc(n)}</span></span><button type="button" class="chip__devo" data-rm-new="${i}" aria-label="Remove">×</button></div>`).join('')}
-          <button type="button" class="btn btn--sm btn--ghost" id="addNew">+ New person this week</button>
+          ${net && d.max_members && d.members.length + draft.newbies.length >= d.max_members
+            ? `<span class="small muted">Puno na — max ${d.max_members} cell leaders. Bawal pang-${d.max_members + 1}.</span>`
+            : `<button type="button" class="btn btn--sm btn--ghost" id="addNew">${net ? '+ New cell leader this week' : '+ New person this week'}</button>`}
         </div>
       </fieldset>
       <div class="reg-actions"><button class="btn btn--primary btn--lg" type="submit" id="repSave" style="width:100%">Send report</button></div>
     </form>
 
     <section class="card reg-card mt-2">
-      <div class="row row--between"><b>${d.is_solid ? 'Solid Lifegroup 🎉' : 'Progress to a solid Lifegroup'}</b><span class="small muted">${d.solid}/${d.target} closed cell</span></div>
-      <div class="progress mt-1"><span style="width:${d.percent}%"></span></div>
+      ${net ? `<div class="row row--between"><b>My cell leaders</b><span class="small muted">${d.members.length} / ${d.max_members || 6} · max ${d.max_members || 6}</span></div>
+      <div class="progress mt-1"><span style="width:${Math.min(100, Math.round((d.members.length / (d.max_members || 6)) * 100))}%"></span></div>`
+      : `<div class="row row--between"><b>${d.is_solid ? 'Solid Lifegroup 🎉' : 'Progress to a solid Lifegroup'}</b><span class="small muted">${d.solid}/${d.target} closed cell</span></div>
+      <div class="progress mt-1"><span style="width:${d.percent}%"></span></div>`}
       <div class="wk wk--md mt-2" aria-label="Last 8 weeks">${d.calendar.map((w) => { const m = w.meeting; return `<span class="wk__c ${!m ? 'wk__c--none' : m.held ? 'wk__c--held' : 'wk__c--skip'}" title="Week of ${weekLabel(w.week_start)}">${m && m.held ? m.present : m ? '×' : ''}</span>`; }).join('')}</div>
       <div class="small muted mt-1">Last 8 weeks · ${d.held_last_4}/4 held recently · streak ${d.streak}</div>
       ${net ? `<p class="small muted mt-2" style="margin-bottom:0">Your members are cell leaders — open their own members in <a href="#" data-view="leaders">My cell leaders</a>.</p>` : `<details class="mt-2"><summary class="small"><b>Members</b> · move between Open cell and Closed cell</summary>
@@ -135,7 +160,7 @@ function render() {
       ${d.recent.length ? `<details class="mt-1"><summary class="small"><b>Recent reports</b></summary><ul class="small" style="margin:6px 0 0;padding-left:18px;line-height:1.7">${d.recent.map((m) => `<li><b>${fmtDate(m.meeting_date)}</b> — ${m.held ? `${m.present_count} present` : `no Lifegroup (${esc(m.no_meeting_reason || '')})`}</li>`).join('')}</ul></details>` : ''}
     </section>`;
 
-  body.innerHTML = tabs + (view === 'leaders' && net ? cellLeadersView() : reportView);
+  body.innerHTML = tabs + structureStrip() + (view === 'leaders' && net ? cellLeadersView() : reportView);
   body.querySelectorAll('[data-view]').forEach((b) => { b.onclick = (e) => { e.preventDefault(); view = b.dataset.view; render(); window.scrollTo(0, 0); }; });
   if (view !== 'report') { bindTier(); return; }
 
@@ -150,7 +175,7 @@ function render() {
   form.querySelectorAll('[data-devo]').forEach((b) => {
     b.onclick = () => { const id = Number(b.dataset.devo); draft.touched = true; if (draft.devotion.has(id)) draft.devotion.delete(id); else draft.devotion.add(id); b.classList.toggle('chip__devo--on', draft.devotion.has(id)); b.setAttribute('aria-pressed', String(draft.devotion.has(id))); };
   });
-  form.querySelector('#addNew').onclick = () => {
+  if (form.querySelector('#addNew')) form.querySelector('#addNew').onclick = () => {
     const name = window.prompt('Full name of the new person (e.g. Juan Dela Cruz):');
     const v = (name || '').trim().replace(/\s+/g, ' ');
     if (!v) return;

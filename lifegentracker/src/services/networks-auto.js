@@ -38,13 +38,7 @@ function syncNetworks(db, user = null) {
         if (curAuto || target) setNet.run(target, g.id);
       }
     }
-    // parent network = the network of the leader's own leader (one level up), auto networks only
-    const nets = db.prepare('SELECT id, leader_person_id, gender FROM networks WHERE is_auto = 1').all();
-    for (const n of nets) {
-      const up = n.leader_person_id ? parentOf.get(n.leader_person_id, n.leader_person_id) : null;
-      const parentNet = up && up.gender === n.gender ? netByLeader.get(up.leader_id) : null;
-      db.prepare("UPDATE networks SET parent_network_id = ? WHERE id = ? AND (parent_network_id IS NOT ?)").run(parentNet && parentNet.id !== n.id ? parentNet.id : null, n.id, parentNet && parentNet.id !== n.id ? parentNet.id : null);
-    }
+    // Networks are flat: every Network has the same shape (network leader → cell leaders → their Lifegroups); no parent/sub-network linking.
     // auto networks with nothing under them go dormant (history kept)
     db.prepare(`UPDATE networks SET is_active = 0, updated_at = datetime('now') WHERE is_auto = 1 AND is_active = 1
         AND NOT EXISTS (SELECT 1 FROM lifegroups g WHERE g.network_id = networks.id AND g.is_active = 1)

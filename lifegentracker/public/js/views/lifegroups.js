@@ -482,12 +482,9 @@ export async function renderLifegroup({ main }, id) {
 
 // ---------------------------------------------------------------------------
 // Networks: the layer above Lifegroups. Each Network has a leader; group leaders
-// report to their Network leader; a Network can sit under a parent Network.
+// report to their Network leader. Networks are flat — every Network has the same shape.
 // ---------------------------------------------------------------------------
 async function networkForm(n, onSaved) {
-  let all = [];
-  try { all = await api.networks({ status: 'all' }); } catch (e) { /* optional */ }
-  const parents = all.filter((x) => !n || x.id !== n.id);
   const v = (k) => esc(n?.[k] ?? '');
   const modal = openModal({
     title: n ? `Edit ${n.name}` : 'New Network',
@@ -506,7 +503,6 @@ async function networkForm(n, onSaved) {
         <span class="help" id="netLeaderHint"></span>
         <span class="help">Lifegroup leaders in this Network report to this person.</span>
         <input name="leader_name" value="${v('leader_name')}" placeholder="Leader name (if not registered)" autocomplete="off" style="margin-top:6px" /></div>
-      <div class="field span-2"><label>Reports to <span class="opt">parent network, optional</span></label><select name="parent_network_id"><option value="">— None (top level) —</option>${parents.map((p) => `<option value="${p.id}" data-gender="${p.gender || ''}" ${Number(n?.parent_network_id) === p.id ? 'selected' : ''}>${esc(p.name)}${p.leader_name ? ' · ' + esc(p.leader_name) : ''}</option>`).join('')}</select></div>
       <div class="field span-2"><label>Notes <span class="opt">optional</span></label><textarea name="notes">${v('notes')}</textarea></div>
       ${n ? `<div class="field span-2"><label class="toggle"><input type="checkbox" name="is_active" ${n.is_active ? 'checked' : ''}/> Network is active</label></div>` : ''}
     </form>`,
@@ -515,12 +511,9 @@ async function networkForm(n, onSaved) {
   modal.querySelector('[data-close]').onclick = closeModal;
   const netGenderNow = () => modal.querySelector('[name=gender]:checked')?.value || null;
   const netHint = modal.querySelector('#netLeaderHint');
-  const parentSel = modal.querySelector('[name=parent_network_id]');
   const syncNetGender = (clearLeader) => {
     const gg = netGenderNow();
     netHint.textContent = gg ? `Only ${gg} are listed — a ${gg} network is led by a ${gg === 'boys' ? 'boy' : 'girl'}.` : 'Choose Boys network or Girls network above first.';
-    // parent must be the same type
-    parentSel.querySelectorAll('option[data-gender]').forEach((o) => { const mismatch = gg && o.dataset.gender && o.dataset.gender !== gg; o.hidden = mismatch; o.disabled = mismatch; if (mismatch && o.selected) parentSel.value = ''; });
     if (clearLeader && modal.querySelector('#netLeaderId').value) { modal.querySelector('#netLeaderId').value = ''; modal.querySelector('#netLeaderPick').value = ''; }
   };
   syncNetGender(false);
@@ -546,7 +539,7 @@ async function networkForm(n, onSaved) {
 
 async function drawNetworks(body) {
   body.innerHTML = html`
-    <p class="small muted mb-1">Networks form <b>automatically</b>: when a Lifegroup leader is a member of another leader's Lifegroup, their group goes under that leader's network. Boys and girls networks are never combined. Open a card to see leaders → members and the weekly Lifegroup grid.${can('lifegroups:manage') ? ' To override, edit a Lifegroup and pick a network by hand.' : ''}</p>
+    <p class="small muted mb-1">Networks form <b>automatically</b>: when a Lifegroup leader is a member of another leader's Lifegroup, their group goes under that leader's Network. Every Network has the same shape — Network leader → cell leaders (max 6) → each cell leader's Lifegroup. Boys and girls are never combined.${can('lifegroups:manage') ? ' To override, edit a Lifegroup and pick a Network by hand.' : ''}</p>
     <div id="netlist"><div class="loading">Loading…</div></div>`;
   const list = body.querySelector('#netlist');
   let nets;
@@ -555,66 +548,44 @@ async function drawNetworks(body) {
     list.innerHTML = html`<div class="card">${emptyState({ icon: 'group', title: 'No Networks yet', text: 'Networks appear by themselves: add a Lifegroup leader as a member of another leader\'s Lifegroup and a network forms under that leader.' })}</div>`;
     return;
   }
-  // order as a tree: top-level first, sub-networks right after their parent
-  const byParent = new Map();
-  nets.forEach((n) => { const k = n.parent_network_id && nets.some((x) => x.id === n.parent_network_id) ? n.parent_network_id : 0; if (!byParent.has(k)) byParent.set(k, []); byParent.get(k).push(n); });
-  const rows = [];
-  const walk = (pid, depth) => (byParent.get(pid) || []).forEach((n) => { rows.push({ ...n, depth }); if (depth < 6) walk(n.id, depth + 1); });
-  walk(0, 0);
   const manage = can('lifegroups:manage');
-
-  // one card — simple: who leads, how many groups / leaders / members
-  const card = (n) => {
-    const nested = n.child_count > 0;
-    const people = nested ? n.total_people : n.people_count;
-    const noun = n.gender === 'boys' ? 'boys' : n.gender === 'girls' ? 'girls' : 'members';
-    return html`<a class="card net-card net-card--${n.gender || 'na'} ${n.depth ? 'net-card--sub' : ''} ${n.is_active ? '' : 'net-card--inactive'}" href="#/networks/${n.id}">
-      <div class="net-card__head">
-        <div class="min-w-0"><div class="net-card__name">${n.name}${n.is_active ? '' : raw(' <span class="badge badge--nodot">Inactive</span>')}${n.is_demo ? raw(' <span class="badge badge--demo badge--nodot">Demo</span>') : ''}</div>
-          <div class="small muted">${n.parent_name ? html`under ${n.parent_name}` : 'Top level'}${nested ? html` · ${n.child_count} sub-network${n.child_count === 1 ? '' : 's'}` : ''}</div></div>
-        ${icon('chevR', 16)}
-      </div>
-      <div class="net-card__leader"><span class="muted small">Network leader</span><b>${n.leader_name || raw('<span class="muted">not set</span>')}</b></div>
-      <div class="net-card__stats">
-        <div><b>${nested ? n.total_groups : n.group_count}</b><span>Groups</span></div>
-        <div><b>${nested ? n.total_leaders : n.leader_count}</b><span>Leaders</span></div>
-        <div><b>${people}</b><span>${noun}</span></div>
-      </div>
-      ${!n.gender ? html`<div class="net-card__warn">${icon('warn', 14)} Choose boys or girls for this Network${n.boys && n.girls ? html` — it currently holds <b>${n.boys} boys</b> and <b>${n.girls} girls</b>; move one side out first` : ''}.</div>` : ''}
-      ${nested ? raw('<div class="small muted mt-1">Totals include sub-networks</div>') : ''}
-    </a>`;
+  const table = (rows) => html`<div class="table-wrap"><table class="table table--stack">
+    <thead><tr><th>Network</th><th>Network leader</th><th class="num">Cell leaders</th><th class="num">Lifegroups</th><th class="num">Members</th><th class="num">Closed cell</th><th class="num">Open cell</th><th>Last held</th></tr></thead>
+    <tbody>${rows.map((n) => html`<tr class="clickable ${n.is_active ? '' : 'is-inactive'}" data-id="${n.id}">
+      <td data-label=""><a href="#/networks/${n.id}"><b>${n.name}</b></a>${n.is_demo ? raw(' <span class="badge badge--demo badge--nodot">Demo</span>') : ''}${n.is_active ? '' : raw(' <span class="badge badge--nodot">Inactive</span>')}${n.is_auto ? raw('<div class="small muted">formed automatically</div>') : ''}</td>
+      <td data-label="Network leader">${n.leader_name || raw('<span class="muted">not set</span>')}</td>
+      <td data-label="Cell leaders" class="num nowrap"><span class="nowrap">${n.cell_leaders}<span class="muted small">/6</span></span></td>
+      <td data-label="Lifegroups" class="num">${n.group_count}</td>
+      <td data-label="Members" class="num">${n.people_count}</td>
+      <td data-label="Closed cell" class="num">${n.closed_cell}</td>
+      <td data-label="Open cell" class="num">${n.open_cell}</td>
+      <td data-label="Last held" class="nowrap small">${n.last_held ? fmtDate(n.last_held, { short: true }) : raw('<span class="muted">—</span>')}</td>
+    </tr>`)}</tbody></table></div>`;
+  const section = (key, rows, blurb) => html`<div class="card mb-2">
+    <div class="card__header"><h2>${key === 'boys' ? 'Boys networks' : key === 'girls' ? 'Girls networks' : 'Boys or girls not set'} ${genderBadge(key)}</h2><span class="hint">${rows.length ? html`${rows.length} network${rows.length === 1 ? '' : 's'} · ${rows.reduce((a, n) => a + n.group_count, 0)} Lifegroups · ${rows.reduce((a, n) => a + n.people_count, 0)} members · ${rows.reduce((a, n) => a + n.closed_cell, 0)} closed cell` : ''}</span></div>
+    <div class="card__body card__body--flush">${rows.length ? table(rows) : html`<div class="small muted" style="padding:16px">${blurb}</div>`}</div></div>`;
+  const inactiveCount = nets.filter((n) => !n.is_active).length;
+  const draw = (showInactive) => {
+    const shown = showInactive ? nets : nets.filter((n) => n.is_active);
+    const boys = shown.filter((n) => n.gender === 'boys'), girls = shown.filter((n) => n.gender === 'girls'), unset = shown.filter((n) => !n.gender);
+    list.innerHTML = html`
+      ${section('boys', boys, 'No boys network yet.')}
+      ${section('girls', girls, 'No girls network yet.')}
+      ${unset.length ? html`${section('na', unset, '')}<p class="small muted">These Networks were made before the boys/girls rule. ${manage ? 'Open each one and press Edit to choose.' : 'Ask an Admin to set them.'}</p>` : ''}
+      ${inactiveCount ? html`<p class="small muted"><a href="#" id="netInactive">${showInactive ? 'Hide' : 'Show'} ${inactiveCount} inactive network${inactiveCount === 1 ? '' : 's'}</a> · inactive = no Lifegroups under it any more (history kept)</p>` : ''}`;
+    list.querySelectorAll('tr.clickable').forEach((tr) => { tr.onclick = (e) => { if (e.target.closest('a')) return; location.hash = `#/networks/${tr.dataset.id}`; }; });
+    list.querySelector('#netInactive')?.addEventListener('click', (e) => { e.preventDefault(); draw(!showInactive); });
   };
-  const section = (key, title, items, blurb) => {
-    const sum = items.filter((n) => !n.depth || !items.some((x) => x.id === n.parent_network_id)).reduce((t, n) => ({ g: t.g + (n.child_count ? n.total_groups : n.group_count), p: t.p + (n.child_count ? n.total_people : n.people_count) }), { g: 0, p: 0 });
-    const noun = key === 'boys' ? 'boys' : key === 'girls' ? 'girls' : 'members';
-    return html`<section class="net-section net-section--${key}">
-      <div class="net-section__head">
-        <h2>${title} <span class="net-section__count">${items.length}</span></h2>
-        <span class="small muted">${items.length ? html`${sum.g} group${sum.g === 1 ? '' : 's'} · ${sum.p} ${noun}` : blurb}</span>
-      </div>
-      ${items.length ? html`<div class="net-cards">${items.map(card)}</div>` : html`<div class="net-section__empty">${blurb}</div>`}
-    </section>`;
-  };
-  const boys = rows.filter((n) => n.gender === 'boys'), girls = rows.filter((n) => n.gender === 'girls'), unset = rows.filter((n) => !n.gender);
-  list.innerHTML = html`
-    ${section('boys', 'Boys networks', boys, 'No boys network yet.')}
-    <hr class="net-divider" />
-    ${section('girls', 'Girls networks', girls, 'No girls network yet.')}
-    ${unset.length ? html`<hr class="net-divider" />
-      <section class="net-section net-section--na">
-        <div class="net-section__head"><h2>Not set yet <span class="net-section__count">${unset.length}</span></h2><span class="small muted">These Networks were made before the boys/girls rule. ${manage ? 'Open each one and press Edit to choose.' : 'Ask an Admin to set them.'}</span></div>
-        <div class="net-cards">${unset.map(card)}</div>
-      </section>` : ''}`;
+  draw(false);
 }
 
-export async function renderNetwork({ main }, id) {
+export async function renderNetwork({ main }, id, openGroups = new Set()) {
   const [n, cal] = await Promise.all([api.network(id), api.networkCalendar(id, 8, { members: true }).catch(() => null)]);
   const manage = can('lifegroups:manage');
   const netTarget = cal ? cal.target : 6;
   const last4Of = (gid, pid) => (cal && cal.members_last4 && cal.members_last4[gid] ? cal.members_last4[gid][pid] || null : null);
   const members = n.groups.reduce((t, g) => t + g.member_count, 0);
   const boys = n.groups.reduce((t, g) => t + g.boys, 0), girls = n.groups.reduce((t, g) => t + g.girls, 0);
-  const leaders = new Set(n.groups.filter((g) => g.is_active && (g.leader_person_id || g.leader_name)).map((g) => g.leader_person_id ? 'p' + g.leader_person_id : 'n' + g.leader_name)).size;
   const personLink = (p) => html`<a href="#/people/${p.id}">${fullName(p)}</a>`;
   const leaderGroup = cal && cal.groups ? cal.groups.find((g) => g.is_leader_group) || null : null;
 
@@ -623,7 +594,7 @@ export async function renderNetwork({ main }, id) {
       <div>
         <a class="small" href="#/lifegroups?tab=networks">${icon('back', 14)} Networks</a>
         <h1 class="mt-1">${n.name}</h1>
-        <div class="row mt-1">${genderBadge(n.gender, { long: true, noun: 'network' })}<span class="small muted">${n.parent_network_id ? html`Network under <a href="#/networks/${n.parent_network_id}">${n.parent_name}</a>` : 'Top-level Network'}${n.is_auto ? ' · formed automatically' : ''}</span>${n.is_active ? '' : raw('<span class="badge badge--nodot">Inactive</span>')}${n.is_demo ? raw('<span class="badge badge--demo badge--nodot">Demo data</span>') : ''}</div>
+        <div class="row mt-1">${genderBadge(n.gender, { long: true, noun: 'network' })}<span class="small muted">${n.is_auto ? 'Formed automatically' : 'Set by hand'}</span>${n.is_active ? '' : raw('<span class="badge badge--nodot">Inactive</span>')}${n.is_demo ? raw('<span class="badge badge--demo badge--nodot">Demo data</span>') : ''}</div>
       </div>
       ${manage ? html`<div class="page-actions">${leaderGroup ? html`<button class="btn btn--primary" id="netReport">${icon('plus')} Report a meeting</button><button class="btn" id="netQr">${icon('link')} Network QR</button>` : ''}<button class="btn" id="editNet">${icon('edit')} Edit</button></div>` : ''}
     </div>
@@ -639,10 +610,11 @@ export async function renderNetwork({ main }, id) {
 
     ${!n.gender ? html`<div class="alert alert--warn mb-2">${icon('warn', 16)} This Network is not yet marked as boys or girls. ${manage ? 'Press Edit and choose one — networks are never combined.' : 'Ask an Admin to set it.'}${boys && girls ? html` It currently holds ${boys} boys and ${girls} girls; move one side to another Network first.` : ''}</div>` : ''}
     <div class="grid grid--stats mb-2" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr))">
-      <div class="card stat"><span class="stat__label">${n.gender === 'boys' ? 'Boys groups' : n.gender === 'girls' ? 'Girls groups' : 'Lifegroups'}</span><span class="stat__value">${n.group_count}${n.gender ? '' : html`<small class="muted" style="font-size:.8rem;font-weight:500"> · ${n.boys_groups} boys / ${n.girls_groups} girls</small>`}</span></div>
-      <div class="card stat"><span class="stat__label">Leaders</span><span class="stat__value">${leaders}</span></div>
-      <div class="card stat"><span class="stat__label">${n.gender === 'boys' ? 'Boys' : n.gender === 'girls' ? 'Girls' : 'Members'}</span><span class="stat__value">${members}</span></div>
-      ${n.gender ? '' : html`<div class="card stat"><span class="stat__label">Boys · Girls</span><span class="stat__value" style="font-size:1.15rem">${boys} · ${girls}</span></div>`}
+      <div class="card stat"><span class="stat__label">Cell leaders</span><span class="stat__value">${n.cell_leaders || 0}<small> / 6</small></span><span class="small muted">${leaderGroup ? 'in ' + leaderGroup.name : 'network leader has no Lifegroup yet'}</span></div>
+      <div class="card stat"><span class="stat__label">Lifegroups</span><span class="stat__value">${n.group_count}</span><span class="small muted">led by the cell leaders</span></div>
+      <div class="card stat"><span class="stat__label">${n.gender === 'boys' ? 'Boys' : n.gender === 'girls' ? 'Girls' : 'Members'}</span><span class="stat__value">${members}</span>${n.gender ? '' : html`<span class="small muted">${boys} boys · ${girls} girls</span>`}</div>
+      <div class="card stat ${n.group_count && n.groups.filter((g) => g.is_active).every((g) => g.members.filter((m) => m.tier === 'solid').length >= netTarget) ? 'stat--ok' : ''}"><span class="stat__label">Closed cell</span><span class="stat__value">${n.closed_cell || 0}</span><span class="small muted">${netTarget} per Lifegroup = solid</span></div>
+      <div class="card stat"><span class="stat__label">Open cell</span><span class="stat__value">${n.open_cell || 0}</span><span class="small muted">no limit</span></div>
     </div>
 
     <div class="card mb-2">
@@ -653,18 +625,12 @@ export async function renderNetwork({ main }, id) {
             <div class="tree__node tree__node--root">
               <span class="tree__tag">Network leader</span>
               <div class="tree__who">${n.leader_person_id ? html`<a href="#/people/${n.leader_person_id}"><b>${n.leader_name}</b></a>` : n.leader_name ? html`<b>${n.leader_name}</b> <span class="small muted">(not registered)</span>` : raw('<span class="muted">No leader set yet</span>')}${n.leader_contact ? html`<span class="small muted"> · ${n.leader_contact}</span>` : ''}</div>
-              <div class="small muted">${n.group_count} Lifegroup leader${n.group_count === 1 ? '' : 's'} report here${n.children.length ? html` · ${n.children.length} sub-network${n.children.length === 1 ? '' : 's'}` : ''}</div>
+              <div class="small muted">${n.group_count} cell leader${n.group_count === 1 ? '' : 's'} report here${leaderGroup ? html` · <a href="#/lifegroups/${leaderGroup.id}" style="color:inherit;text-decoration:underline">${leaderGroup.name}</a>` : ''}</div>
             </div>
             ${n.notes ? html`<div class="small muted mt-1">${n.notes}</div>` : ''}
           </div>
 
-          ${n.children.length ? html`<div class="tree__children">${n.children.map((c) => html`<a class="tree__node tree__node--net" href="#/networks/${c.id}">
-            <span class="tree__tag">Sub-network</span>
-            <div class="tree__who"><b>${c.name}</b> <span class="muted">· ${c.leader_name || 'no leader'}</span></div>
-            <div class="small muted">${c.total_groups} group${c.total_groups === 1 ? '' : 's'} · ${c.total_people} members · ${c.total_boys} boys / ${c.total_girls} girls</div>
-          </a>`)}</div>` : ''}
-
-          ${n.groups.length ? html`<div class="tree__children">${n.groups.map((g) => html`<details class="tree__node tree__node--group ${g.is_active ? '' : 'is-inactive'}">
+          ${n.groups.length ? html`<div class="tree__children">${n.groups.map((g) => html`<details class="tree__node tree__node--group ${g.is_active ? '' : 'is-inactive'}" data-gid="${g.id}" ${openGroups.has(g.id) ? 'open' : ''}>
             <summary>
               <div class="row row--between" style="gap:10px;flex-wrap:wrap">
                 <div class="min-w-0">
@@ -678,7 +644,7 @@ export async function renderNetwork({ main }, id) {
             </summary>
             <div class="tree__members">
               <div class="row small mb-1" style="gap:10px"><a href="#/lifegroups/${g.id}">Open ${g.name} ${icon('chevR', 12)}</a>${g.leader_person_id ? html`<a href="#/people/${g.leader_person_id}">Leader profile</a>` : ''}</div>
-              ${g.members.length ? memberSections(g.members.map((m) => ({ ...m, name: fullName(m), last4: last4Of(g.id, m.id), sub: html`${raw(statusBadge(m.status))} <span class="muted">since ${fmtDate(m.joined_at, { short: true })}</span>` })), { manage: false }) : raw('<div class="small muted" style="padding:6px 0">No members yet.</div>')}
+              ${g.members.length ? memberSections(g.members.map((m) => ({ ...m, name: fullName(m), last4: last4Of(g.id, m.id), sub: html`${raw(statusBadge(m.status))} <span class="muted">since ${fmtDate(m.joined_at, { short: true })}</span>` })), { manage }) : raw('<div class="small muted" style="padding:6px 0">No members yet.</div>')}
             </div>
           </details>`)}</div>` : html`<div class="tree__children"><div class="tree__node small muted">No Lifegroups in this Network yet.${manage ? ' Edit a Lifegroup and choose this Network.' : ''}</div></div>`}
         </div>
@@ -687,8 +653,20 @@ export async function renderNetwork({ main }, id) {
     </div>
 
     <div class="card mb-2" id="netCalendar"></div>
-    ${can('people:delete') && !n.groups.length && !n.children.length ? html`<div class="row mt-3" style="padding:0 4px"><button class="btn btn--ghost small" id="delNet" style="color:var(--muted)">Delete this empty network</button></div>` : ''}`;
+    ${can('people:delete') && !n.groups.length && !(n.children || []).length ? html`<div class="row mt-3" style="padding:0 4px"><button class="btn btn--ghost small" id="delNet" style="color:var(--muted)">Delete this empty network</button></div>` : ''}`;
   renderNetworkCalendar(main.querySelector('#netCalendar'), n.id, cal);
+  // move a member between Open / Closed cell straight from the Structure tree (closed cell cap still applies)
+  main.querySelectorAll('.tree [data-tier]').forEach((b) => {
+    b.onclick = () => withLoading(b, async () => {
+      const gid = Number(b.closest('details[data-gid]').dataset.gid);
+      try {
+        await api.setTier(gid, Number(b.dataset.tier), b.dataset.to);
+        toast(b.dataset.to === 'solid' ? 'Moved to the closed cell.' : 'Moved to the open cell.');
+        const keep = new Set([...main.querySelectorAll('details[data-gid][open]')].map((d) => Number(d.dataset.gid)));
+        renderNetwork({ main }, id, keep);
+      } catch (e) { toast(e.message, 'error'); }
+    });
+  });
   if (manage && leaderGroup) {
     let prog = null;
     const load = async () => { prog = await api.lifegroupProgress(leaderGroup.id, 4); return prog; };
@@ -703,7 +681,7 @@ export async function renderNetwork({ main }, id) {
   }
   main.querySelector('#editNet')?.addEventListener('click', () => networkForm(n, () => renderNetwork({ main }, id)));
   main.querySelector('#delNet')?.addEventListener('click', async () => {
-    const ok = await confirmDialog({ title: `Delete ${n.name}?`, message: 'This Network has no Lifegroups or sub-networks, so it can be removed.', confirmText: 'Delete', danger: true });
+    const ok = await confirmDialog({ title: `Delete ${n.name}?`, message: 'This Network has no Lifegroups, so it can be removed.', confirmText: 'Delete', danger: true });
     if (!ok) return;
     try { await api.deleteNetwork(n.id); toast('Network deleted.', 'info'); location.hash = '#/lifegroups?tab=networks'; } catch (e) { toast(e.message, 'error'); }
   });

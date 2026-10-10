@@ -1033,3 +1033,14 @@ details[open] > summary .t-open { display: none; } details:not([open]) > summary
 .kpi-row--4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 @media (max-width: 480px) { .kpi-row--4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media print { .sexsplit { grid-template-columns: 1fr 1fr; } }
+
+/* Leader QR page: structure strip */
+.struct { padding: 10px 14px !important; margin-bottom: 12px; }
+.struct__row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 5px 0; }
+.struct__row + .struct__row { border-top: 1px dashed var(--border); }
+.struct__row--in { padding-left: 14px; }
+.struct__row--in2 { padding-left: 28px; }
+.struct__row--in::before, .struct__row--in2::before { content: '↳'; color: var(--muted); margin-left: -12px; }
+.struct__tag { font-size: .66rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 650; min-width: 86px; }
+.struct__full { color: var(--red-600); }
+.struct__ok { color: var(--green-700, #15803d); }

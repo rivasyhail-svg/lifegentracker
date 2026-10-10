@@ -262,3 +262,18 @@ In **My cell leaders**, each name now shows a badge for *their* Lifegroup this w
 - **Network page (`#/networks/:id`)**: top buttons **Report a meeting** and **Network QR**, plus a "Network QR" card under the title showing the QR of that Network only (link = the network leader's permanent leader link). Copy link / Print / **New QR** (resets the token so an old, leaked QR stops working). Every Network gets its QR automatically as soon as its leader leads a Lifegroup — nothing to set up.
 - **Reports → Lifegroups**: the headline tiles are now two sections, **Boys** and **Girls**, each with only Networks · Cell leaders · Open cell · Closed cell (cell leaders = members of a network leader's Lifegroup; open/closed counts are from the ordinary Lifegroups).
 - API: `GET /api/reports/network-status` adds `structure.{boys,girls}` = { networks, cell_leaders, lifegroups, open_cell, closed_cell, members }. Tests 78/78 on SQLite and Postgres.
+
+## Update 3j — flat Networks, table-style Networks tab, move cells from the Network page (2026-10-10)
+- **No more top-level / sub-networks.** Every Network has the same shape: Network leader → their Lifegroup (= the cell leaders, max 6) → each cell leader's own Lifegroup. The "Reports to (parent network)" field is gone from the Network form, the auto-network sync no longer links parents, and the Network page no longer shows "Top-level / Sub-network". (Existing data is untouched — the column simply isn't used.)
+- **Lifegroups → Networks tab** is now a table like the Groups tab: Boys networks / Girls networks with Network · Network leader · Cell leaders n/6 · Lifegroups · Members · Closed cell · Open cell · Last held. Inactive networks are hidden behind a "Show n inactive" link.
+- **Network page**: tiles are Cell leaders n/6 · Lifegroups · Members · Closed cell · Open cell; in the Structure tree each Lifegroup's Open / Closed cell now has **Closed → / ← Open** buttons (staff only; closed-cell cap of 6 still applies; the tree stays open after a move).
+- **Demo data** now shows the full structure: "Demo Network A Leaders" (network leader's Lifegroup holding the 2 boys cell leaders) and "Demo Network B Leaders" for girls, plus the 4 ordinary demo Lifegroups. Reload demo data (Settings → Demo data → Remove, then Load) to see it.
+- API: `GET /api/networks` rows add `cell_leaders`, `closed_cell`, `open_cell`, `last_held`. Tests 78/78 on SQLite and Postgres.
+
+## Update 3k — structure shown on the leader QR page (2026-10-10)
+- Every leader QR page now starts with a small **structure card**:
+  - Network leader page: *Network leader → Cell leaders n / 6 (max 6 — bawal pang-7) → Each cell leader: Closed cell max 6 (= solid Lifegroup) + Open cell / new members (walang limit)*.
+  - Regular leader page: *Closed cell x / 6 (max 6 — 6 = solid Lifegroup) · Open cell y (walang limit)*.
+- "My cell leaders" header shows **n / 6 (max 6)**; each expanded cell leader shows *Closed cell x / 6 (solid ✓)* and *Open cell y*; the cell headers say *max 6 = solid* / *walang limit*.
+- Weekly report tab of a network leader: progress bar = **My cell leaders n / 6**; the "+ New cell leader this week" button disappears at 6 with the note *Puno na — max 6 cell leaders. Bawal pang-7.* (the server also refuses a 7th).
+- Front-end only (public/js/lifegroup.js, public/css/styles.css). Tests 78/78 on SQLite and Postgres.
