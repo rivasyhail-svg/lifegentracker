@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { can } from '../app.js';
+import { can, moduleOn } from '../app.js';
 import { html, raw, icon, avatar, statusBadge, classBadge, fmtDate, fmtDateTime, fmtNum, fmtPct, age, toast, confirmDialog, openModal, closeModal, withLoading, STATUS_LABELS, DAY_LABELS, DAY_SHORT, TIME_LABELS, fmtSchedule } from '../ui.js';
 import { findLifegroup, genderBadge } from './lifegroups.js';
 
@@ -39,7 +39,7 @@ export async function renderPerson({ main }, id) {
       <div class="card stat"><span class="stat__label">Last attended</span><span class="stat__value" style="font-size:1.15rem">${p.last_attended ? fmtDate(p.last_attended) : '—'}</span></div>
     </div>
 
-    ${lifegroupCard(p)}
+    ${moduleOn('lifegroups') ? lifegroupCard(p) : ''}
 
     <div class="grid grid--2">
       <div class="card">

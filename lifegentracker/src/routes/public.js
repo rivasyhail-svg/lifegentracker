@@ -9,6 +9,7 @@ const { wrap, HttpError } = require('../lib/util');
 const reg = require('../services/registrations');
 const { normalizeEmail, normalizeName, tidyName } = require('../lib/normalize');
 const prog = require('../services/lifegroup-progress');
+const emailcheck = require('../services/emailcheck');
 
 const router = express.Router();
 
@@ -48,22 +49,32 @@ router.get('/register/options', rateLimit('options', 300), wrap((req, res) => {
 }));
 
 // POST /api/public/register/check { full_name, email } → booleans only (pre-submit hint)
-router.post('/register/check', rateLimit('check', SUBMIT_MAX * 4), wrap((req, res) => {
+router.post('/register/check', rateLimit('check', SUBMIT_MAX * 4), wrap(async (req, res) => {
   const db = getDb();
   const s = reg.settings(db);
   const st = reg.guard.status(db, s, { token: req.body?.qr_token });
   if (!st.open) throw new HttpError(403, st.message, { reason: st.reason });
   const d = reg.duplicates(db, { email_normalized: normalizeEmail(req.body?.email), full_name_normalized: normalizeName(tidyName(req.body?.full_name)) });
-  res.json({ email_taken: d.email_taken, name_match: reg.on(s.qr_name_duplicate_check) && d.name_match });
+  // Early "is this a real email?" hint: Gmail username rules + does the domain exist (DNS MX / A record)?
+  const emailNow = String(req.body?.email || '').trim();
+  const email_problem = emailNow ? (emailcheck.gmailProblem(emailNow) || await emailcheck.emailDomainProblem(emailNow)) : null;
+  res.json({ email_taken: d.email_taken, name_match: reg.on(s.qr_name_duplicate_check) && d.name_match, email_problem });
 }));
 
 // POST /api/public/register — the actual submission
-router.post('/register', rateLimit('submit', SUBMIT_MAX), wrap((req, res) => {
+router.post('/register', rateLimit('submit', SUBMIT_MAX), wrap(async (req, res) => {
   const body = req.body || {};
   if (body.website) { // honeypot field — real people never fill it
     return res.status(201).json({ ok: true, ref_code: 'LG-0000-000000', status: 'pending' });
   }
   const db = getDb();
+  // Window first (same message as before), then field rules (sync, cheap), then the DNS check of the email domain
+  // (async, cached, fails open on network trouble). submit() re-runs the sync checks atomically.
+  const st = reg.guard.status(db, reg.settings(db), { token: body.qr_token });
+  if (!st.open) throw new HttpError(403, st.message, { reason: st.reason });
+  reg.validate(body, db, { strict: true });
+  const domainProblem = await emailcheck.emailDomainProblem(String(body.email || '').trim());
+  if (domainProblem) throw new HttpError(400, domainProblem, { email: domainProblem });
   const deviceId = reg.guard.device(db, req, res);
   const result = reg.submit(body, { ip: req.ip, userAgent: req.headers['user-agent'], deviceId, token: body.qr_token });
   res.status(201).json({ ok: true, ...result });
@@ -78,8 +89,10 @@ function groupOr404(token) {
   if (!g) throw new HttpError(404, 'This Lifegroup link is not valid anymore. Please ask the Lifegen admin for a new link.');
   return g;
 }
+const pubMeeting = (m) => ({ id: m.id, meeting_date: m.meeting_date, held: Boolean(m.held), present_count: m.present_count, no_meeting_reason: m.no_meeting_reason, present: m.present.map((x) => x.name), present_ids: m.present.map((x) => x.id), devotion_ids: m.devotion.map((x) => x.id) });
 const pubMember = (m) => ({ id: m.id, name: `${m.first_name} ${m.last_name}`, tier: m.tier, role: m.role, meetings_attended: m.meetings_attended, devotions: m.devotions, last_meeting_attended: m.last_meeting_attended, last4: m.last4 });
 
+router.use('/lifegroup', require('../middleware/auth').requireModule('lifegroups'));
 router.get('/lifegroup/:token', rateLimit('lg-get', 240), wrap((req, res) => {
   const db = getDb();
   const g = groupOr404(req.params.token);
@@ -90,10 +103,19 @@ router.get('/lifegroup/:token', rateLimit('lg-get', 240), wrap((req, res) => {
     church_name: s.church_name, today: prog.churchToday(db, s), target: p.target, solid: p.solid, new_members: p.new_members, total: p.total, is_solid: p.is_solid, percent: p.percent,
     streak: p.streak, held_last_4: p.held_last_4, met_this_week: p.met_this_week, last_meeting: p.last_meeting,
     members: p.members.map(pubMember), calendar: p.calendar, max_members: p.max_members,
-    recent: prog.meetingsOf(db, g.id, 6).map((m) => ({ id: m.id, meeting_date: m.meeting_date, held: Boolean(m.held), present_count: m.present_count, no_meeting_reason: m.no_meeting_reason, present: m.present.map((x) => x.name), present_ids: m.present.map((x) => x.id), devotion_ids: m.devotion.map((x) => x.id) })),
+    recent: prog.meetingsOf(db, g.id, 6).map(pubMeeting),
     former: prog.formerMembers(db, g.id).map((m) => ({ id: m.id, name: `${m.first_name} ${m.last_name}`, tier: m.tier, left_at: m.left_at })),
     network: prog.leaderNetworkView(db, g.leader_person_id, { weeks: 4 }),
+    this_week: prog.weekMarks(db, g.id, s),
   });
+}));
+
+// Network leader taps Present / Absent for one cell leader (a member of their own Lifegroup) for this week's meeting.
+router.post('/lifegroup/:token/attendance', rateLimit('lg-mark', 240), wrap((req, res) => {
+  const db = getDb();
+  const g = groupOr404(req.params.token);
+  const out = prog.markAttendance(db, g.id, req.body?.person_id, req.body?.status, { date: req.body?.date, via: 'leader_link', byName: g.leader_display || 'leader' });
+  res.json({ ok: true, ...out, this_week: prog.weekMarks(db, g.id), recent: prog.meetingsOf(db, g.id, 6).map(pubMeeting) });
 }));
 
 router.post('/lifegroup/:token/report', rateLimit('lg-report', 60), wrap((req, res) => {

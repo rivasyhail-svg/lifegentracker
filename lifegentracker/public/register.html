@@ -52,12 +52,22 @@
           <input class="input" id="email" name="email" type="email" inputmode="email" autocomplete="email" autocapitalize="off" spellcheck="false" maxlength="160" required placeholder="name@gmail.com" />
           <span class="error" data-error-for="email" role="alert"></span>
         </div>
-        <div class="field reg-age">
+        <div class="field" data-ask="contact" hidden>
+          <label for="contact_number">Contact number <span class="req" aria-hidden="true">*</span></label>
+          <input class="input" id="contact_number" name="contact_number" type="tel" inputmode="tel" autocomplete="tel" maxlength="40" placeholder="0917 123 4567" />
+          <span class="error" data-error-for="contact_number" role="alert"></span>
+        </div>
+        <div class="field" data-ask="sex" hidden>
+          <label>Boy or Girl <span class="req" aria-hidden="true">*</span></label>
+          <div class="choice" id="sexChoice"><label class="choice__opt"><input type="radio" name="sex" value="male" /><span>Boy</span></label><label class="choice__opt"><input type="radio" name="sex" value="female" /><span>Girl</span></label></div>
+          <span class="error" data-error-for="sex" role="alert"></span>
+        </div>
+        <div class="field reg-age" data-ask="age">
           <label for="age">Age <span class="req" aria-hidden="true">*</span></label>
           <input class="input" id="age" name="age" type="number" inputmode="numeric" min="5" max="100" step="1" required placeholder="18" />
           <span class="error" data-error-for="age" role="alert"></span>
         </div>
-        <div class="field">
+        <div class="field" data-ask="school">
           <label for="school">School <span class="req" aria-hidden="true">*</span></label>
           <input class="input" id="school" name="school" type="text" list="schoolList" autocomplete="organization" autocapitalize="words" maxlength="120" required placeholder="e.g. Bulacan State University" />
           <datalist id="schoolList"></datalist>
@@ -73,7 +83,7 @@
       <!-- Step 2 -->
       <fieldset class="reg-step" data-step="2" hidden>
         <legend class="reg-step-title"><span class="reg-step-no">2</span> Ministry &amp; leaders</legend>
-        <div class="field">
+        <div class="field" data-ask="ministry">
           <label for="ministry">Ministry <span class="req" aria-hidden="true">*</span></label>
           <select class="select" id="ministry" name="ministry" required>
             <option value="">Choose a ministry…</option>
@@ -81,6 +91,11 @@
           <span class="error" data-error-for="ministry" role="alert"></span>
         </div>
         <div class="field">
+          <label for="invited_by">Invited by <span class="opt">optional</span></label>
+          <input class="input" id="invited_by" name="invited_by" type="text" autocapitalize="words" autocomplete="off" maxlength="120" placeholder="Who invited you to Lifegen?" />
+          <span class="error" data-error-for="invited_by" role="alert"></span>
+        </div>
+        <div class="field" data-ask="leader">
           <label for="leader_name">Leader name <span class="req" aria-hidden="true">*</span></label>
           <div class="reg-pick" id="leaderPick" hidden>
             <input class="input reg-pick__search" type="search" placeholder="Search your leader…" autocomplete="off" aria-label="Search your leader" />
@@ -90,10 +105,11 @@
           <div class="reg-pick__manual" id="leaderManual">
             <input class="input" id="leader_name" name="leader_name" type="text" list="leaderList" autocapitalize="words" autocomplete="off" maxlength="120" required placeholder="Your Lifegroup leader" />
             <datalist id="leaderList"></datalist>
+            <button type="button" class="reg-na" data-na="leader_name">No leader yet — N/A</button>
           </div>
           <span class="error" data-error-for="leader_name" role="alert"></span>
         </div>
-        <div class="field">
+        <div class="field" data-ask="leader">
           <label for="network_leader_name">Network leader name <span class="req" aria-hidden="true">*</span></label>
           <div class="reg-pick" id="networkPick" hidden>
             <div class="reg-pick__list" role="listbox" aria-label="Tap your network leader"></div>
@@ -102,6 +118,7 @@
           <div class="reg-pick__manual" id="networkManual">
             <input class="input" id="network_leader_name" name="network_leader_name" type="text" list="networkLeaderList" autocapitalize="words" autocomplete="off" maxlength="120" required placeholder="Your leader's network leader" />
             <datalist id="networkLeaderList"></datalist>
+            <button type="button" class="reg-na" data-na="network_leader_name">No network leader yet — N/A</button>
           </div>
           <span class="error" data-error-for="network_leader_name" role="alert"></span>
         </div>

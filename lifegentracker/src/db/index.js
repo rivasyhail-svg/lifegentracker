@@ -80,6 +80,7 @@ function initDb() {
     db.exec('CREATE UNIQUE INDEX IF NOT EXISTS uq_users_username_ci ON users (lower(username))');
   }
   enforceIndependentNetworks(db);
+  require('../middleware/auth').refreshOptions(db);
 
   return db;
 }

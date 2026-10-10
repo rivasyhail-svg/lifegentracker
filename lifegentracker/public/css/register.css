@@ -59,3 +59,7 @@
 .reg-pick__empty { padding: 10px 12px; font-size: .86rem; color: var(--muted); }
 .reg-pick__other { align-self: flex-start; background: none; border: 0; padding: 2px 0; font: inherit; font-size: .82rem; color: var(--brand-700); text-decoration: underline; cursor: pointer; }
 .reg-pick__manual[hidden] { display: none; }
+
+/* "N/A" quick answer under Leader / Network leader */
+.reg-na { margin-top: 8px; background: none; border: 1px dashed var(--ink-300, #d1d5db); color: var(--ink-600, #4b5563); border-radius: 8px; padding: 7px 12px; font-size: .84rem; cursor: pointer; }
+.reg-na:hover { border-color: var(--brand-600, #0f766e); color: var(--brand-600, #0f766e); }

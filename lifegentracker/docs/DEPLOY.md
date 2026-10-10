@@ -322,3 +322,21 @@ Enforced in three layers:
   Lifegroups/Networks, Person form, Reports, History, Progress, the public `/register` form and the leader page).
   Labels, buttons, data, error messages and empty states are unchanged. No functional change.
 - Files: public/js/views/*.js, public/js/lifegroup.js, public/register.html, public/js/app.js, server.js. Version `2026.10.10-3q`.
+
+## Update 3r — 2026-10-10 — Settings → Customize (admin self-service)
+- New **Customize** card in Settings (Admin): switch sections on/off (Lifegroups & Networks, Reports, QR Registration);
+  extra permissions for Attendance Staff (manage Lifegroups, review/approve QR registrations, correct past Sundays)
+  and Viewer (see contact details); Sunday-only attendance; closed-cell size; cell leaders per Network leader;
+  which questions the QR form asks (Age, School, Ministry, Leader/Network leader, **Contact number**, **Boy/Girl**);
+  days + hours the QR form is open (any days, not only Sunday) or Always open.
+- Enforced server-side: switched-off sections return 404 on their APIs and disappear from the menu; permissions are
+  computed from the settings on every request; QR validation requires only the questions that are switched on;
+  the public form hides the others. Contact number / Boy-Girl are copied to the person on approval.
+- Migration 014 (registrations.contact_number, registrations.sex, default settings). Defaults = today's behaviour.
+- Tests: 84/84 (SQLite + Postgres). Version `2026.10.10-3r`.
+
+## Update 3s (2026-10-10) — "update on website.pdf"
+- **Lifegroups page**: `+ New Network` button beside the title (top-left); the stat tiles are now two cards **Boys** / **Girls** (Networks · Cell leaders · Open cell · Closed cell, like Reports → Lifegroups). Everything below (Network / Needs Lifegroup / Progress tabs, search, filters) unchanged.
+- **QR registration**: new optional **Invited by** field (step 2, stored in `registrations.invited_by`, searchable, shown in the inbox detail/edit, copied to the person's notes on approval). **Leader name / Network leader name** accept **N/A** (tap option in the list, or the "No leader yet — N/A" button; also typed n/a, none, wala) → saved as `N/A`, no automatic Lifegroup placement. **Real-Gmail checks**: Gmail username rules (6–30 letters/digits/dots, no odd characters or doubled dots, `+tag` allowed) on client + server, and the email domain must exist (DNS MX/A lookup, cached, fails open on DNS outage; disable with `LIFEGEN_EMAIL_DNS_CHECK=off`). The early `/api/public/register/check` returns `email_problem` so the hint shows while typing. The hidden "Website" honeypot stays hidden on purpose (bots fill it, people never see it).
+- **Leader link page** (`/lifegroup?t=…`): the structure box (Closed cell 0/6 · Open cell no limit / Network leader · Cell leaders) was removed. **Network leaders** now get **Present / Absent** buttons under every cell leader: saved immediately to this week's meeting of the network leader's Lifegroup (`lifegroup_meetings` + `lifegroup_meeting_attendance`, one row per leader per meeting, upsert — never duplicated), tapping again corrects it, every tap is in the Activity log (with the previous value). Staff can correct via `POST /api/lifegroups/:id/attendance`. A full weekly report for the same date updates the same meeting and records explicit absences.
+- DB migration **015**: `registrations.invited_by`, `lifegroup_meeting_attendance.absent / marked_by / marked_at`. Tests: 88/88 (SQLite + Postgres).

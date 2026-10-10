@@ -84,9 +84,15 @@ function tokenOk(db, s, token) {
 // ---------------------------------------------------------------------------
 // Open / closed decision
 // ---------------------------------------------------------------------------
+function windowDays(s) {
+  const days = [...new Set(String(s.qr_window_days ?? '0').split(',').map((x) => Number(x.trim())).filter((n) => Number.isInteger(n) && n >= 0 && n <= 6))].sort();
+  return days.length ? days : [0];
+}
 function windowInfo(s) {
   const start = toMin(s.qr_window_start, 12 * 60), end = toMin(s.qr_window_end, 17 * 60);
-  return { mode: s.qr_window === 'always' ? 'always' : 'sunday', start, end, label: `Sunday, ${fmtTime(start)} – ${fmtTime(end)}` };
+  const days = windowDays(s);
+  const dayLabel = days.length === 7 ? 'every day' : days.map((d) => DAY_NAMES[d]).join(' & ');
+  return { mode: s.qr_window === 'always' ? 'always' : 'sunday', start, end, days, label: `${dayLabel}, ${fmtTime(start)} – ${fmtTime(end)}` };
 }
 /**
  * Returns { open: true } or { open: false, reason: 'disabled'|'paused'|'window'|'expired', message, ...extras }.
@@ -97,15 +103,15 @@ function status(db, s, { token } = {}) {
   const on = (v) => v !== '0' && v !== 'false' && v !== '';
   const win = windowInfo(s);
   const base = { window: win.mode, window_label: win.label, mode: s.qr_mode === 'rotating' ? 'rotating' : 'reusable' };
-  if (!on(s.qr_registration_enabled)) return { ...base, open: false, reason: 'disabled', message: 'Registration is currently unavailable. Please ask the Lifegen team.' };
+  if (!on(s.qr_registration_enabled) || (s.module_registrations !== undefined && !on(s.module_registrations))) return { ...base, open: false, reason: 'disabled', message: 'Registration is currently unavailable. Please ask the Lifegen team.' };
   if (!tokenOk(db, s, token)) return { ...base, open: false, reason: 'expired', message: 'This QR code has expired. Please scan the latest QR code posted at the venue.' };
   if (s.qr_auto_paused_at) return { ...base, open: false, reason: 'paused', message: 'Registration is paused for a moment because of unusually high volume. Please try again in a few minutes or approach an usher.' };
   const override = s.qr_open_until && !Number.isNaN(Date.parse(s.qr_open_until)) && Date.parse(s.qr_open_until) > Date.now();
   if (win.mode === 'sunday' && !override) {
     const now = churchNow(s.qr_timezone);
-    const openNow = now.dow === 0 && now.minutes >= win.start && now.minutes < win.end;
+    const openNow = win.days.includes(now.dow) && now.minutes >= win.start && now.minutes < win.end;
     if (!openNow) {
-      return { ...base, open: false, reason: 'window', message: `Registration is open every ${win.label} (Philippine time). Please scan the QR again during Lifegen service.`, today: DAY_NAMES[now.dow] };
+      return { ...base, open: false, reason: 'window', message: `Registration is open ${win.days.length === 7 ? '' : 'every '}${win.label} (Philippine time). Please scan the QR again during Lifegen service.`, today: DAY_NAMES[now.dow] };
     }
   }
   return { ...base, open: true, override: Boolean(override) };

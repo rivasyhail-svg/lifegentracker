@@ -17,7 +17,7 @@ import { renderLifegroups, renderLifegroup, renderNetwork } from './views/lifegr
 import { renderRegistrations, renderQrPoster, refreshPendingBadge } from './views/registrations.js';
 
 /** Shown in the sidebar so everyone can tell which build is running. Bump on every release. */
-export const APP_VERSION = '2026.10.10-3q';
+export const APP_VERSION = '2026.10.10-3s';
 
 export const state = {
   user: null,
@@ -27,6 +27,9 @@ export const state = {
   standalone: false,
 };
 export const can = (perm) => Boolean(state.user?.permissions?.includes(perm));
+// Feature sections switched on/off by the admin (Settings → Customize). Missing setting = on.
+export const moduleOn = (name) => { const v = state.settings?.[`module_${name}`]; return v === undefined || (v !== '0' && v !== 'false' && v !== ''); };
+const MODULE_OF_NAV = { lifegroups: 'lifegroups', reports: 'reports', registrations: 'registrations' };
 
 // ---------------------------------------------------------------------------
 // Routes
@@ -71,6 +74,7 @@ async function route() {
   const match = routes.map((r) => ({ r, m: hashPath.match(r.path) })).find((x) => x.m);
   if (!match) { location.hash = '#/dashboard'; return; }
   const { r, m } = match;
+  if (MODULE_OF_NAV[r.nav] && !moduleOn(MODULE_OF_NAV[r.nav])) { location.hash = '#/dashboard'; return; }
   if (r.perm && !can(r.perm)) {
     main.innerHTML = html`<div class="card"><div class="empty"><div class="empty__icon">${icon('lock', 26)}</div><h3>Restricted</h3><p>Your role (${ROLE_LABELS[state.user.role_id]}) does not have access to this page.</p><a class="btn mt-2" href="#/dashboard">Back to dashboard</a></div></div>`;
     return;
@@ -128,9 +132,9 @@ function renderShell() {
         ${navLink('#/dashboard', 'dashboard', 'Dashboard', 'chart')}
         ${navLink('#/people', 'people', 'People', 'people')}
         ${navLink('#/attendance', 'attendance', 'Attendance', 'check')}
-        ${navLink('#/lifegroups', 'lifegroups', 'Lifegroups', 'group')}
-        ${navLink('#/reports', 'reports', 'Reports', 'calendar')}
-        ${can('registrations:manage') && !state.standalone ? navLink('#/registrations', 'registrations', 'Registrations', 'qr') + '' : ''}
+        ${moduleOn('lifegroups') ? navLink('#/lifegroups', 'lifegroups', 'Lifegroups', 'group') : ''}
+        ${moduleOn('reports') ? navLink('#/reports', 'reports', 'Reports', 'calendar') : ''}
+        ${can('registrations:manage') && moduleOn('registrations') && !state.standalone ? navLink('#/registrations', 'registrations', 'Registrations', 'qr') + '' : ''}
         ${navLink('#/settings', 'settings', 'Settings', 'settings')}
         <a class="nav__foot" href="#/privacy">Privacy &amp; Terms</a>
       </nav>
@@ -222,6 +226,12 @@ function setupGlobalSearch() {
 // ---------------------------------------------------------------------------
 // Boot
 // ---------------------------------------------------------------------------
+window.addEventListener('lifegen:settings-changed', async () => {
+  try { const st = await api.status(); if (st.user) state.user = st.user; state.settings = st.settings || state.settings; } catch { /* keep current */ }
+  renderShell();
+  route();
+});
+
 export async function boot() {
   const app = document.getElementById('app');
   let status;

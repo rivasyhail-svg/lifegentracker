@@ -2,7 +2,7 @@ import { api } from '../api.js';
 import { renderProgressCard, renderNetworkCalendar, drawProgressTab, solidBadge, weekStrip, memberSections, memberDots, dotsKey, TIER_LABEL, linkDialog, meetingForm } from './progress.js';
 import { can } from '../app.js';
 import {
-  html, raw, icon, avatar, fullName, statusBadge, fmtDate, emptyState, debounce, toast, confirmDialog,
+  html, raw, icon, avatar, fullName, statusBadge, fmtDate, fmtNum, emptyState, debounce, toast, confirmDialog,
   openModal, closeModal, withLoading, formData, DAY_LABELS, DAY_SHORT, TIME_LABELS, fmtClock, fmtSchedule, toISODate,
 } from '../ui.js';
 
@@ -216,17 +216,19 @@ export async function renderLifegroups({ main, query }) {
 
   main.innerHTML = html`
     <div class="page-header">
-      <div><h1>Lifegroups</h1></div>
+      <div class="row" style="gap:12px;align-items:center;flex-wrap:wrap"><h1>Lifegroups</h1>${can('lifegroups:manage') ? html`<button class="btn" id="newNetwork">${icon('plus')} New Network</button>` : ''}</div>
       <div class="page-actions">${can('lifegroups:manage') ? html`<button class="btn btn--primary" id="newGroup">${icon('plus')} New Lifegroup</button>` : ''}</div>
     </div>
-    ${overview ? (() => { const st = overview.structure || { networks: overview.networks, cell_leaders: 0, lifegroups: overview.active_groups, closed_cell: overview.closed_cell, open_cell: overview.open_cell, boys: {}, girls: {} }; const sub = (k) => html`<div class="small muted" style="text-transform:none;letter-spacing:0;font-weight:500">${st.boys[k] || 0} boys · ${st.girls[k] || 0} girls</div>`; return html`<div class="kpi-row mb-2" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr))">
-      <a class="kpi kpi--link" href="#/lifegroups"><b>${st.networks}</b><span>Networks</span>${sub('networks')}</a>
-      <a class="kpi kpi--link" href="#/lifegroups"><b>${st.cell_leaders}</b><span>Cell leaders</span>${sub('cell_leaders')}</a>
-      <a class="kpi kpi--link" href="#/lifegroups"><b>${st.lifegroups}</b><span>Lifegroups</span>${sub('lifegroups')}</a>
-      <a class="kpi kpi--link kpi--teal" href="#/reports?view=lifegroups"><b>${st.closed_cell}</b><span>Closed cell</span>${sub('closed_cell')}</a>
-      <a class="kpi kpi--link" href="#/lifegroups?tab=progress"><b>${st.open_cell}</b><span>Open cell</span>${sub('open_cell')}</a>
-      <a class="kpi kpi--link ${overview.without_group ? 'kpi--amber' : ''}" href="#/lifegroups?tab=needs"><b>${overview.without_group}</b><span>Without Lifegroup</span><div class="small muted" style="text-transform:none;letter-spacing:0;font-weight:500">${overview.with_group} with Lifegroup</div></a>
-    </div>`; })() : ''}
+    ${overview ? (() => { const st = overview.structure || {}; const zero = { networks: 0, cell_leaders: 0, lifegroups: 0, members: 0, open_cell: 0, closed_cell: 0 };
+      const sec = (label, x, g) => html`<div class="card sexsplit__card">
+        <div class="card__header"><h2>${label}</h2><span class="hint">${x.lifegroups} Lifegroup${x.lifegroups === 1 ? '' : 's'} · ${x.members} member${x.members === 1 ? '' : 's'}</span></div>
+        <div class="card__body"><div class="kpi-row kpi-row--4">
+          <a class="kpi kpi--link" href="#/lifegroups?gender=${g}"><b>${fmtNum(x.networks)}</b><span>Networks</span></a>
+          <a class="kpi kpi--link" href="#/lifegroups?gender=${g}"><b>${fmtNum(x.cell_leaders)}</b><span>Cell leaders</span></a>
+          <a class="kpi kpi--link" href="#/lifegroups?tab=progress"><b>${fmtNum(x.open_cell)}</b><span>Open cell</span></a>
+          <a class="kpi kpi--link kpi--teal" href="#/reports?view=lifegroups"><b>${fmtNum(x.closed_cell)}</b><span>Closed cell</span></a>
+        </div></div></div>`;
+      return html`<div class="sexsplit mb-2">${sec('Boys', st.boys || zero, 'boys')}${sec('Girls', st.girls || zero, 'girls')}</div>`; })() : ''}
     <div class="filter-tabs mb-2" id="tabs">
       <button data-t="groups" class="${tab === 'groups' ? 'active' : ''}">Network</button>
       <button data-t="needs" class="${tab === 'needs' ? 'active' : ''}">Needs Lifegroup ${overview ? html`<span class="count">${overview.without_group}</span>` : ''}</button>
@@ -235,6 +237,7 @@ export async function renderLifegroups({ main, query }) {
     <div id="tabBody"></div>`;
 
   main.querySelector('#newGroup')?.addEventListener('click', () => groupForm(null, (g) => { location.hash = `#/lifegroups/${g.id}`; }));
+  main.querySelector('#newNetwork')?.addEventListener('click', () => networkForm(null, (n) => { location.hash = `#/networks/${n.id}`; }));
   main.querySelector('#tabs').onclick = (e) => {
     const b = e.target.closest('button'); if (!b) return;
     location.hash = '#/lifegroups' + api.qs({ tab: b.dataset.t === 'groups' ? '' : b.dataset.t });

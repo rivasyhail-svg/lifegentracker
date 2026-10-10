@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { state, can } from '../app.js';
+import { state, can, moduleOn } from '../app.js';
 import { html, raw, icon, fmtDate, fmtNum, emptyState } from '../ui.js';
 import { lineChart } from '../charts.js';
 
@@ -66,7 +66,7 @@ export async function renderDashboard({ main }) {
       <div class="card__body">${raw(lineChart(d.trend.map((w) => ({ label: shortSunday(w.service_date), value: w.present_count, title: fmtDate(w.service_date) })), { aria: 'Attendance trend', width: 900, height: 230, cls: 'chart--trend' }))}</div>
     </div>
 
-    ${d.lifegroups ? html`<div class="card mb-2">
+    ${d.lifegroups && moduleOn('lifegroups') ? html`<div class="card mb-2">
       <div class="card__header"><h2>Lifegroup overview</h2><a class="small" href="#/lifegroups?tab=needs">Needs Lifegroup ${icon('chevR', 13)}</a></div>
       <div class="card__body">
         <div class="kpi-row" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr))">

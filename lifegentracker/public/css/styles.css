@@ -997,14 +997,20 @@ details[open] > summary .t-open { display: none; } details:not([open]) > summary
 .handles { margin-top: 3px; } .handles .ok { color: var(--green-700, #15803d); } .handles .bad { color: #b91c1c; }
 /* network leader: cell leader list */
 .cl { border-top: 1px solid var(--border); }
-.cl__sum { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 16px; cursor: pointer; list-style: none; }
+.cl__sum { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 16px 8px; cursor: pointer; list-style: none; }
 .cl__sum::-webkit-details-marker { display: none; }
 .cl__sum::before { content: ''; width: 7px; height: 7px; border-right: 1.5px solid var(--muted); border-bottom: 1.5px solid var(--muted); transform: rotate(-45deg); margin-right: 4px; flex: none; transition: transform .15s; }
-.cl[open] > .cl__sum::before { transform: rotate(45deg); }
+.cl[open] > .cl__sum::before, .cl.is-open > .cl__sum::before { transform: rotate(45deg); }
 .cl__name { flex: 1; font-weight: 600; }
-.cl[open] { background: var(--ink-50); }
+.cl[open], .cl.is-open { background: var(--ink-50); }
+.cl__pa { padding-top: 0; margin-top: -4px; }
 .cl .cells .cell { background: #fff; }
 .cl__held { flex: none; font-size: .68rem; }
+.cl__pa { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 0 16px 10px 27px; }
+.pa { display: inline-flex; gap: 6px; }
+.pa .btn--present.is-on { background: var(--green-600); border-color: var(--green-600); color: #fff; }
+.pa .btn--absent.is-on { background: var(--red-600, #dc2626); border-color: var(--red-600, #dc2626); color: #fff; }
+.pa .btn[aria-pressed="true"] { box-shadow: 0 0 0 3px rgba(15, 118, 110, .12); }
 .cl__recent { margin: 4px 0 8px; padding-left: 18px; font-size: .82rem; line-height: 1.55; color: var(--ink-700, #374151); }
 .stat--ok { background: var(--green-100); border-color: #bbf7d0; } .stat--ok .stat__value { color: #15803d; }
 
@@ -1056,3 +1062,4 @@ details[open] > summary .t-open { display: none; } details:not([open]) > summary
 .brand__ver { display: block; font-size: .62rem; color: var(--muted); opacity: .8; letter-spacing: .02em; }
 .netblock .table td:first-child { white-space: normal; }
 .netblock .table th:last-child, .netblock .table td:last-child { padding-right: 16px; }
+.stack-sm { display: flex; flex-direction: column; gap: 6px; }

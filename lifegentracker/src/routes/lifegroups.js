@@ -43,13 +43,14 @@ function timeBucket(hhmm) {
 
 function shape(g, user) {
   if (!g) return g;
+  const db = getDb();
   const out = {
     ...g,
     leader_name: g.leader_person_id ? `${g.leader_first_name} ${g.leader_last_name}` : g.leader_name,
     network: g.network_name || g.network, // display name (legacy free-text kept as fallback)
     time_bucket: timeBucket(g.schedule_time),
     leads_network: Boolean(Number(g.leads_network)),
-    max_members: Number(g.leads_network) ? prog.NETWORK_LEADER_MAX : null, // open cell has no limit; capacity column is no longer used
+    max_members: Number(g.leads_network) ? prog.networkMax(db) : null, // open cell has no limit; capacity column is no longer used
   };
   out.slots = out.max_members == null ? null : Math.max(out.max_members - g.member_count, 0);
   if (!can(user, 'people:view_private')) out.leader_contact = undefined;
@@ -297,6 +298,13 @@ router.put('/:id/members/:personId/tier', requirePermission('lifegroups:manage')
 }));
 
 // POST /api/lifegroups/:id/meetings — staff files/overwrites the report for a date
+// Staff correction of one member's Present / Absent for this week's (or a given date's) meeting.
+router.post('/:id/attendance', requirePermission('lifegroups:manage'), wrap((req, res) => {
+  const db = getDb();
+  const out = prog.markAttendance(db, Number(req.params.id), req.body?.person_id, req.body?.status, { date: req.body?.date, via: 'admin', user: req.user });
+  res.json({ ok: true, ...out, this_week: prog.weekMarks(db, Number(req.params.id)) });
+}));
+
 router.post('/:id/meetings', requirePermission('lifegroups:manage'), wrap((req, res) => {
   const db = getDb();
   const id = intId(req.params.id);

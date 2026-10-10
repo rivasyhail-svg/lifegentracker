@@ -95,9 +95,9 @@ api.use((req, res, next) => {
 });
 api.get('/health', (req, res) => {
   if (dbInitError && !tryInitDb()) {
-    return res.status(503).json({ ok: false, app: 'LifegenTracker', version: '2026.10.10-3q', time: new Date().toISOString(), db: 'error', db_error: dbInitError.message, hint: dbHint(dbInitError) });
+    return res.status(503).json({ ok: false, app: 'LifegenTracker', version: '2026.10.10-3s', time: new Date().toISOString(), db: 'error', db_error: dbInitError.message, hint: dbHint(dbInitError) });
   }
-  res.json({ ok: true, app: 'LifegenTracker', version: '2026.10.10-3q', time: new Date().toISOString(), db: 'ok' });
+  res.json({ ok: true, app: 'LifegenTracker', version: '2026.10.10-3s', time: new Date().toISOString(), db: 'ok' });
 });
 // Every other API call needs the database; answer clearly instead of crashing while it is unavailable.
 api.use((req, res, next) => {
@@ -109,12 +109,13 @@ api.use('/public', require('./src/routes/public')); // QR self-registration form
 api.use('/auth', require('./src/routes/auth'));
 api.use('/people', require('./src/routes/people'));
 api.use('/services', require('./src/routes/services'));
-api.use('/lifegroups', require('./src/routes/lifegroups'));
-api.use('/networks', require('./src/routes/networks'));
+const { requireModule } = require('./src/middleware/auth');
+api.use('/lifegroups', requireModule('lifegroups'), require('./src/routes/lifegroups'));
+api.use('/networks', requireModule('lifegroups'), require('./src/routes/networks'));
 api.use('/dashboard', require('./src/routes/dashboard'));
-api.use('/reports', require('./src/routes/reports'));
-api.use('/registrations', require('./src/routes/registrations').router); // QR inbox (admin only)
-api.use('/qr', require('./src/routes/registrations').qr);                     // QR code (admin only)
+api.use('/reports', requireModule('reports'), require('./src/routes/reports'));
+api.use('/registrations', requireModule('registrations'), require('./src/routes/registrations').router); // QR inbox
+api.use('/qr', requireModule('registrations'), require('./src/routes/registrations').qr);                     // QR code
 api.use('/', require('./src/routes/admin')); // /search, /users, /roles, /settings, /demo, /system
 api.use((req, res) => res.status(404).json({ error: 'API route not found.' }));
 app.use('/api', api);

@@ -126,10 +126,13 @@ router.put(
 // Settings
 // ---------------------------------------------------------------------------
 const QR_KEYS = ['qr_registration_enabled', 'qr_require_approval', 'qr_show_leaders', 'qr_name_duplicate_check', 'qr_public_url', 'qr_ministries',
-  'qr_mode', 'qr_window', 'qr_window_start', 'qr_window_end', 'qr_timezone', 'qr_device_lock', 'qr_hourly_cap', 'qr_ip_daily_cap'];
+  'qr_mode', 'qr_window', 'qr_window_start', 'qr_window_end', 'qr_timezone', 'qr_device_lock', 'qr_hourly_cap', 'qr_ip_daily_cap',
+  'qr_window_days', 'qr_ask_age', 'qr_ask_school', 'qr_ask_ministry', 'qr_ask_leader', 'qr_ask_contact', 'qr_ask_sex'];
 const QR_ENUM = { qr_mode: ['reusable', 'rotating'], qr_window: ['always', 'sunday'] };
-const QR_TEXT = new Set(['qr_public_url', 'qr_ministries', 'qr_window_start', 'qr_window_end', 'qr_timezone', 'qr_hourly_cap', 'qr_ip_daily_cap', ...Object.keys(QR_ENUM)]);
-const RULE_KEYS = ['attendance_sunday_lock', 'lifegroup_solid_target'];
+const QR_TEXT = new Set(['qr_public_url', 'qr_ministries', 'qr_window_start', 'qr_window_end', 'qr_timezone', 'qr_hourly_cap', 'qr_ip_daily_cap', 'qr_window_days', ...Object.keys(QR_ENUM)]);
+// Settings → Customize: feature sections, extra role permissions, structure numbers. All on/off except network_leader_max.
+const CUSTOM_TOGGLES = ['module_lifegroups', 'module_registrations', 'module_reports', ...Object.keys(auth.PERMISSION_OPTIONS)];
+const RULE_KEYS = ['attendance_sunday_lock', 'lifegroup_solid_target', 'network_leader_max', ...CUSTOM_TOGGLES];
 const SETTING_KEYS = ['church_name', 'service_name', 'church_address', 'church_contact', 'privacy_contact', ...QR_KEYS, ...RULE_KEYS];
 const OPTIONAL_SETTINGS = new Set(['church_address', 'church_contact', 'privacy_contact', ...QR_KEYS]);
 
@@ -153,10 +156,14 @@ router.put(
           if (k.startsWith('qr_') && !QR_TEXT.has(k) && !['0', '1'].includes(v)) throw new HttpError(400, `${k} must be on (1) or off (0).`);
           if (k === 'attendance_sunday_lock' && !['0', '1'].includes(v)) throw new HttpError(400, 'attendance_sunday_lock must be on (1) or off (0).');
           if (k === 'lifegroup_solid_target' && !/^([1-9]|[1-4]\d|50)$/.test(v)) throw new HttpError(400, 'Solid target must be a whole number from 1 to 50.');
+          if (k === 'network_leader_max' && !/^([1-9]|[1-9]\d|100)$/.test(v)) throw new HttpError(400, 'Cell leaders per network leader must be a whole number from 1 to 100.');
+          if (k === 'qr_window_days' && !/^[0-6](,[0-6])*$/.test(v)) throw new HttpError(400, 'Open days must be day numbers 0 (Sunday) to 6 (Saturday), comma separated.');
+          if (CUSTOM_TOGGLES.includes(k) && !['0', '1'].includes(v)) throw new HttpError(400, `${k} must be on (1) or off (0).`);
           upd.run(k, v);
         }
       }
     })();
+    auth.refreshOptions(db);
     const out = {};
     for (const r of db.prepare('SELECT key, value FROM settings').all()) out[r.key] = r.value;
     activity.log(db, req.user, 'settings.update', 'settings', null, `Updated settings: ${SETTING_KEYS.filter((k) => req.body?.[k] !== undefined).join(', ')}`);

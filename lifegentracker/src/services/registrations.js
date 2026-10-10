@@ -10,11 +10,16 @@ const { clean, HttpError, today } = require('../lib/util');
 const { normalizeEmail, isValidEmail, normalizeName, tidyName, splitFullName, isSqliteUnique } = require('../lib/normalize');
 const activity = require('./activity');
 const guard = require('./qrguard');
+const emailcheck = require('./emailcheck');
 
 const ci = (a, b) => String(a).localeCompare(String(b), undefined, { sensitivity: 'base' }); // case-insensitive sort (dialect-free)
 
 const MIN_AGE = 5, MAX_AGE = 100;
-const FIELDS = ['full_name', 'email', 'age', 'school', 'leader_name', 'network_leader_name', 'ministry'];
+const FIELDS = ['full_name', 'email', 'age', 'school', 'leader_name', 'network_leader_name', 'ministry', 'contact_number', 'sex', 'invited_by'];
+/** "N/A" (also n/a, na, none, wala) — the registrant has no leader / network leader yet. Stored as the canonical 'N/A'. */
+const NA = 'N/A';
+const isNA = (v) => /^\s*(n\s*\/?\s*a|none|wala(\s+pa)?)\.?\s*$/i.test(String(v ?? ''));
+const leaderOrNA = (v) => (isNA(v) ? NA : tidyName(v));
 
 function settings(db) {
   const out = {};
@@ -22,6 +27,12 @@ function settings(db) {
   return out;
 }
 const on = (v) => v !== '0' && v !== 'false' && v !== '';
+
+/** Which optional questions the public form asks (Settings → Customize). Full name + email are always asked. */
+function askedFields(s) {
+  const ask = (k, d = '1') => on(s[k] === undefined ? d : s[k]);
+  return { age: ask('qr_ask_age'), school: ask('qr_ask_school'), ministry: ask('qr_ask_ministry'), leader: ask('qr_ask_leader'), contact: ask('qr_ask_contact', '0'), sex: ask('qr_ask_sex', '0') };
+}
 
 function ministries(db, s = settings(db)) {
   return String(s.qr_ministries || '').split(/[,\n]/).map((x) => x.trim()).filter(Boolean);
@@ -33,7 +44,7 @@ function publicOptions(db, { token, device_id } = {}) {
   const st = guard.status(db, s, { token });
   const enabled = st.open;
   const out = { enabled, closed_reason: enabled ? null : st.reason, closed_message: enabled ? null : st.message, window: st.window, window_label: st.window_label,
-    church_name: s.church_name, service_name: s.service_name, ministries: ministries(db, s), schools: [], leaders: [], network_leaders: [], name_check: on(s.qr_name_duplicate_check),
+    church_name: s.church_name, service_name: s.service_name, ministries: ministries(db, s), schools: [], leaders: [], network_leaders: [], name_check: on(s.qr_name_duplicate_check), fields: askedFields(s),
     device_lock: on(s.qr_device_lock), min_seconds: guard.MIN_FORM_SECONDS };
   if (!enabled) return out;
   if (out.device_lock && device_id) {
@@ -70,16 +81,29 @@ function publicOptions(db, { token, device_id } = {}) {
 /** Validate + normalise a public submission (also used by the admin Edit). Throws 400 with per-field errors. */
 function validate(body, db, { strict = false } = {}) {
   const b = body || {};
+  const ask = askedFields(settings(db));
   const data = {
     full_name: tidyName(b.full_name),
     email: String(b.email ?? '').trim(),
     age: b.age === '' || b.age === null || b.age === undefined ? NaN : Number(b.age),
     school: clean(b.school),
-    leader_name: tidyName(b.leader_name),
-    network_leader_name: tidyName(b.network_leader_name),
+    leader_name: leaderOrNA(b.leader_name),
+    network_leader_name: leaderOrNA(b.network_leader_name),
+    invited_by: tidyName(b.invited_by),
     ministry: clean(b.ministry),
+    contact_number: clean(b.contact_number),
+    sex: ['male', 'female'].includes(String(b.sex || '').toLowerCase()) ? String(b.sex).toLowerCase() : null,
   };
   const errors = {};
+  // Questions switched off are stored as empty (age 0) and never block a submission; existing answers are kept on admin edit.
+  if (!ask.age && !Number.isFinite(data.age)) data.age = 0;
+  if (!ask.school && !data.school) data.school = '';
+  if (!ask.ministry && !data.ministry) data.ministry = '';
+  if (!ask.leader && !data.leader_name) data.leader_name = '';
+  if (!ask.leader && !data.network_leader_name) data.network_leader_name = '';
+  if (ask.contact && !data.contact_number) errors.contact_number = 'Please enter your contact number.';
+  else if (data.contact_number && (data.contact_number.replace(/\D/g, '').length < 7 || data.contact_number.length > 40 || !/^[\d+\s().-]+$/.test(data.contact_number))) errors.contact_number = 'Please enter a valid mobile number (e.g. 0917 123 4567).';
+  if (ask.sex && !data.sex) errors.sex = 'Please choose Boy or Girl.';
   if (!data.full_name) errors.full_name = 'Please enter your full name.';
   else if (data.full_name.length < 3 || data.full_name.length > 120) errors.full_name = 'Please enter your real full name.';
   else if (data.full_name.split(' ').length < 2) errors.full_name = 'Please enter your first and last name.';
@@ -88,14 +112,16 @@ function validate(body, db, { strict = false } = {}) {
   else if (!isValidEmail(data.email)) errors.email = 'That email address does not look valid (e.g. name@gmail.com).';
   if (!Number.isFinite(data.age)) errors.age = 'Please enter your age.';
   else if (!Number.isInteger(data.age) || String(b.age).includes('.')) errors.age = 'Age must be a whole number.';
-  else if (data.age < MIN_AGE || data.age > MAX_AGE) errors.age = `Age must be between ${MIN_AGE} and ${MAX_AGE}.`;
-  if (!data.school) errors.school = 'Please enter your school.';
+  else if (data.age !== 0 && (data.age < MIN_AGE || data.age > MAX_AGE)) errors.age = `Age must be between ${MIN_AGE} and ${MAX_AGE}.`;
+  if (!data.school && ask.school) errors.school = 'Please enter your school.';
   else if (data.school.length > 120) errors.school = 'School name is too long.';
-  if (!data.leader_name) errors.leader_name = "Please enter your leader's name.";
+  if (!data.leader_name && ask.leader) errors.leader_name = "Please enter your leader's name.";
   else if (data.leader_name.length > 120) errors.leader_name = 'Leader name is too long.';
-  if (!data.network_leader_name) errors.network_leader_name = "Please enter your network leader's name.";
+  if (!data.network_leader_name && ask.leader) errors.network_leader_name = "Please enter your network leader's name.";
   else if (data.network_leader_name.length > 120) errors.network_leader_name = 'Network leader name is too long.';
-  if (!data.ministry) errors.ministry = 'Please choose a ministry.';
+  if (data.invited_by.length > 120) errors.invited_by = 'Invited by is too long.';
+  else if (data.invited_by && !/^[\p{L}\p{M}][\p{L}\p{M}\s.,'’&/()-]*$/u.test(data.invited_by)) errors.invited_by = 'Please enter the name of the person who invited you.';
+  if (!data.ministry) { if (ask.ministry) errors.ministry = 'Please choose a ministry.'; }
   else {
     const list = ministries(db);
     if (list.length && !list.some((m) => m.toLowerCase() === data.ministry.toLowerCase())) errors.ministry = 'Please choose a ministry from the list.';
@@ -106,11 +132,13 @@ function validate(body, db, { strict = false } = {}) {
   if (strict) { // public form: real-person rules (admin Edit keeps the relaxed rules so staff can fix odd-but-real names)
     if (!errors.full_name) { const p = guard.nameProblem(data.full_name_normalized); if (p) errors.full_name = p; }
     if (!errors.email) { const p = guard.emailProblem(data.email_normalized); if (p) errors.email = p; }
-    for (const k of ['school', 'leader_name', 'network_leader_name']) {
-      if (!errors[k] && /(.)\1\1\1/.test(data[k]) ) errors[k] = 'Please check this field — it does not look right.';
+    if (!errors.email) { const p = emailcheck.gmailProblem(data.email); if (p) errors.email = p; } // Gmail's own username rules
+    for (const k of ['school', 'leader_name', 'network_leader_name', 'invited_by']) {
+      if (!errors[k] && data[k] && /(.)\1\1\1/.test(data[k]) ) errors[k] = 'Please check this field — it does not look right.';
     }
   }
   if (Object.keys(errors).length) throw new HttpError(400, Object.values(errors)[0], errors);
+  data.invited_by = data.invited_by || null;
   return data;
 }
 
@@ -167,9 +195,9 @@ function submit(body, meta = {}) {
       if (dup.email_taken) throw new HttpError(409, EMAIL_TAKEN_MSG, { email: EMAIL_TAKEN_MSG });
       const flag = on(s.qr_name_duplicate_check) && dup.name_match;
       const flags = guard.riskFlags(db, { device_id: deviceId, ip_hash: ipHash, form_seconds: formSeconds, email_normalized: data.email_normalized, full_name_normalized: data.full_name_normalized });
-      const info = db.prepare(`INSERT INTO registrations (full_name, full_name_normalized, email, email_normalized, age, school, leader_name, network_leader_name, ministry,
+      const info = db.prepare(`INSERT INTO registrations (full_name, full_name_normalized, email, email_normalized, age, school, leader_name, network_leader_name, ministry, contact_number, sex, invited_by,
           possible_duplicate, duplicate_note, ip_hash, user_agent, device_id, risk_flags, form_seconds)
-        VALUES (@full_name, @full_name_normalized, @email, @email_normalized, @age, @school, @leader_name, @network_leader_name, @ministry, @flag, @note, @ip, @ua, @device, @risk, @secs)`)
+        VALUES (@full_name, @full_name_normalized, @email, @email_normalized, @age, @school, @leader_name, @network_leader_name, @ministry, @contact_number, @sex, @invited_by, @flag, @note, @ip, @ua, @device, @risk, @secs)`)
         .run({ ...data, flag: flag ? 1 : 0, note: flag ? `Same name as ${dup.name_match_ref} (different email) — please review.` : null, ip: ipHash, ua: String(meta.userAgent || '').slice(0, 160),
           device: deviceId, risk: flags.length ? flags.join(',') : null, secs: formSeconds });
       const id = info.lastInsertRowid;
@@ -210,7 +238,7 @@ function reviewContext(db, reg) {
  * share a name, the one whose network leader matches wins; otherwise nothing is done (admin assigns manually).
  */
 function autoPlace(db, pid, reg, user) {
-  if (!reg.leader_name) return null;
+  if (!reg.leader_name || isNA(reg.leader_name)) return null; // 'N/A' → no automatic placement
   const cur = db.prepare('SELECT lifegroup_id FROM lifegroup_memberships WHERE person_id = ? AND left_at IS NULL').get(pid);
   if (cur) return null; // already in a Lifegroup — never move people automatically
   const rows = db.prepare(`SELECT g.id, g.name, g.gender, g.capacity, COALESCE(lp.first_name || ' ' || lp.last_name, g.leader_name) AS leader_name,
@@ -254,16 +282,17 @@ function approve(db, id, user, { mode = 'create', person_id = null, status = 'fi
       // fill the blanks only — never overwrite what staff already recorded
       db.prepare(`UPDATE people SET email = COALESCE(NULLIF(email, ''), @email), email_normalized = COALESCE(email_normalized, @email_normalized),
           school = COALESCE(NULLIF(school, ''), @school), age = COALESCE(age, @age), ministry = COALESCE(NULLIF(ministry, ''), @ministry),
+          contact_number = COALESCE(NULLIF(contact_number, ''), @contact_number), sex = COALESCE(sex, @sex),
           registration_id = COALESCE(registration_id, @rid), updated_at = datetime('now') WHERE id = @pid`)
-        .run({ email: reg.email, email_normalized: reg.email_normalized, school: reg.school, age: reg.age, ministry: reg.ministry, rid: reg.id, pid: p.id });
+        .run({ email: reg.email, email_normalized: reg.email_normalized, school: reg.school || null, age: reg.age || null, ministry: reg.ministry || null, contact_number: reg.contact_number || null, sex: reg.sex || null, rid: reg.id, pid: p.id });
       pid = p.id;
     } else {
       const { first_name, last_name } = splitFullName(reg.full_name);
-      const notes = `QR registration ${reg.ref_code} · Leader: ${reg.leader_name} · Network leader: ${reg.network_leader_name}`;
-      const info = db.prepare(`INSERT INTO people (first_name, last_name, email, email_normalized, full_name_normalized, school, age, ministry, status, date_registered, notes,
+      const notes = `QR registration ${reg.ref_code}${reg.leader_name ? ` · Leader: ${reg.leader_name}` : ''}${reg.network_leader_name ? ` · Network leader: ${reg.network_leader_name}` : ''}${reg.invited_by ? ` · Invited by: ${reg.invited_by}` : ''}`;
+      const info = db.prepare(`INSERT INTO people (first_name, last_name, email, email_normalized, full_name_normalized, school, age, ministry, contact_number, sex, status, date_registered, notes,
           registration_source, registered_at, registration_id, created_by)
-        VALUES (@first_name, @last_name, @email, @email_normalized, @full_name_normalized, @school, @age, @ministry, @status, @date_registered, @notes, 'qr', @registered_at, @rid, @uid)`)
-        .run({ first_name, last_name: last_name || first_name, email: reg.email, email_normalized: reg.email_normalized, full_name_normalized: reg.full_name_normalized, school: reg.school, age: reg.age, ministry: reg.ministry,
+        VALUES (@first_name, @last_name, @email, @email_normalized, @full_name_normalized, @school, @age, @ministry, @contact_number, @sex, @status, @date_registered, @notes, 'qr', @registered_at, @rid, @uid)`)
+        .run({ first_name, last_name: last_name || first_name, email: reg.email, email_normalized: reg.email_normalized, full_name_normalized: reg.full_name_normalized, school: reg.school || null, age: reg.age || null, ministry: reg.ministry || null, contact_number: reg.contact_number || null, sex: reg.sex || null,
           status, date_registered: String(reg.submitted_at).slice(0, 10), notes, registered_at: reg.submitted_at, rid: reg.id, uid: user ? user.id : null });
       pid = info.lastInsertRowid;
       const year = String(reg.submitted_at).slice(0, 4);
@@ -387,7 +416,7 @@ function update(db, id, user, body) {
   if (dup.email_taken) throw new HttpError(409, 'That email already belongs to another person or registration.');
   try {
     db.prepare(`UPDATE registrations SET full_name=@full_name, full_name_normalized=@full_name_normalized, email=@email, email_normalized=@email_normalized, age=@age, school=@school,
-        leader_name=@leader_name, network_leader_name=@network_leader_name, ministry=@ministry, possible_duplicate=@flag, updated_at=datetime('now') WHERE id=@id`)
+        leader_name=@leader_name, network_leader_name=@network_leader_name, ministry=@ministry, contact_number=@contact_number, sex=@sex, invited_by=@invited_by, possible_duplicate=@flag, updated_at=datetime('now') WHERE id=@id`)
       .run({ ...data, flag: dup.name_match ? 1 : 0, id });
   } catch (err) {
     if (isSqliteUnique(err, 'email_normalized')) throw new HttpError(409, 'That email already belongs to another registration.');
@@ -411,7 +440,7 @@ function list(db, { status = 'pending', q = '' } = {}) {
   if (['pending', 'approved', 'rejected'].includes(status)) { where.push('r.status = @status'); params.status = status; }
   const qq = clean(q);
   if (qq) {
-    where.push('(r.full_name LIKE @q OR r.email LIKE @q OR r.school LIKE @q OR r.leader_name LIKE @q OR r.network_leader_name LIKE @q OR r.ministry LIKE @q OR r.ref_code LIKE @q)');
+    where.push('(r.full_name LIKE @q OR r.email LIKE @q OR r.school LIKE @q OR r.leader_name LIKE @q OR r.network_leader_name LIKE @q OR r.ministry LIKE @q OR r.invited_by LIKE @q OR r.ref_code LIKE @q)');
     params.q = `%${qq}%`;
   }
   return db.prepare(`SELECT r.*, p.person_code, u.display_name AS reviewed_by_name,
@@ -427,5 +456,5 @@ function counts(db) {
   return { pending: row.pending || 0, approved: row.approved || 0, rejected: row.rejected || 0, total: row.total || 0, flagged: row.flagged || 0 };
 }
 
-module.exports = { FIELDS, MIN_AGE, MAX_AGE, publicOptions, validate, duplicates, submit, get, list, counts, approve, reject, bulkReject, update, remove, reviewContext, settings, on, EMAIL_TAKEN_MSG,
+module.exports = { FIELDS, MIN_AGE, MAX_AGE, NA, isNA, askedFields, publicOptions, validate, duplicates, submit, get, list, counts, approve, reject, bulkReject, update, remove, reviewContext, settings, on, EMAIL_TAKEN_MSG,
   BLOCK_KINDS, addBlock, removeBlock, listBlocks, guardState, resume, rotate, openNow, guard };

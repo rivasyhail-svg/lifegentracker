@@ -2,9 +2,20 @@
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const H = { 'Content-Type': 'application/json', 'X-Requested-With': 'LifegenTracker' };
-const FIELDS = ['full_name', 'email', 'age', 'school', 'ministry', 'leader_name', 'network_leader_name'];
-const LABELS = { full_name: 'Full name', email: 'Email / Gmail', age: 'Age', school: 'School', ministry: 'Ministry', leader_name: 'Leader', network_leader_name: 'Network leader' };
-const STEP_FIELDS = { 1: ['full_name', 'email', 'age', 'school'], 2: ['ministry', 'leader_name', 'network_leader_name'] };
+let FIELDS = ['full_name', 'email', 'age', 'school', 'ministry', 'leader_name', 'network_leader_name'];
+const LABELS = { full_name: 'Full name', email: 'Email / Gmail', contact_number: 'Contact number', sex: 'Boy / Girl', age: 'Age', school: 'School', ministry: 'Ministry', invited_by: 'Invited by', leader_name: 'Leader', network_leader_name: 'Network leader' };
+const STEP_FIELDS = { 1: ['full_name', 'email', 'age', 'school'], 2: ['ministry', 'invited_by', 'leader_name', 'network_leader_name'] };
+const NA = 'N/A';
+const ASK_OF = { contact_number: 'contact', sex: 'sex', age: 'age', school: 'school', ministry: 'ministry', leader_name: 'leader', network_leader_name: 'leader' };
+// Which questions the admin switched on (Settings → Customize). Hidden questions are removed from validation, review and submit.
+function applyAskedFields(fields) {
+  const ask = fields || {};
+  const asked = (f) => { const k = ASK_OF[f]; if (!k) return true; const v = ask[k]; return v === undefined ? (k !== 'contact' && k !== 'sex') : Boolean(v); };
+  $$('[data-ask]').forEach((el) => { el.hidden = !asked(Object.keys(ASK_OF).find((f) => ASK_OF[f] === el.dataset.ask)); });
+  STEP_FIELDS[1] = ['full_name', 'email', 'contact_number', 'sex', 'age', 'school'].filter(asked);
+  STEP_FIELDS[2] = ['ministry', 'invited_by', 'leader_name', 'network_leader_name'].filter(asked);
+  FIELDS = [...STEP_FIELDS[1], ...STEP_FIELDS[2]];
+}
 const DRAFT_KEY = 'lifegen.register.draft'; // sessionStorage only: survives a refresh, cleared on success
 
 const form = $('#regForm');
@@ -15,6 +26,18 @@ let deviceHeader = null; // fallback when the browser drops the httpOnly device 
 let step = 1;
 let lastCheck = { email_taken: false, name_match: false };
 
+// Same rules the server applies (Google's own username rules) so the hint appears while typing.
+function gmailProblem(email) {
+  const at = email.lastIndexOf('@'); if (at <= 0) return '';
+  const domain = email.slice(at + 1); if (domain !== 'gmail.com' && domain !== 'googlemail.com') return '';
+  let local = email.slice(0, at); const plus = local.indexOf('+'); if (plus > 0) local = local.slice(0, plus);
+  if (!/^[a-z0-9.]+$/.test(local)) return 'A Gmail address can only have letters, numbers and dots before the @.';
+  if (local.startsWith('.') || local.endsWith('.') || local.includes('..')) return 'A Gmail address cannot start or end with a dot, or have two dots in a row.';
+  const len = local.replace(/\./g, '').length;
+  if (len < 6) return 'That does not look like a real Gmail — Gmail usernames have at least 6 letters or numbers.';
+  if (len > 30) return 'That does not look like a real Gmail — Gmail usernames have at most 30 letters or numbers.';
+  return '';
+}
 async function api(method, url, body) {
   const headers = { ...H };
   if (deviceHeader) headers['X-Lifegen-Device'] = deviceHeader;
@@ -45,6 +68,8 @@ function validateField(name) {
       if (!e) return 'Please enter your email / Gmail.';
       if (!EMAIL_RE.test(e)) return 'That email address does not look valid (e.g. name@gmail.com).';
       if (lastCheck.email_taken && lastCheck.for_email === e) return 'This email is already registered. If you believe this is an error, please contact the Lifegen admin.';
+      const g = gmailProblem(e); if (g) return g;
+      if (lastCheck.email_problem && lastCheck.for_email === e) return lastCheck.email_problem;
       return '';
     }
     case 'age': {
@@ -55,7 +80,10 @@ function validateField(name) {
       return '';
     }
     case 'school': return tidy(v.school) ? '' : 'Please enter your school.';
+    case 'contact_number': { const c = tidy(v.contact_number); if (!c) return 'Please enter your contact number.'; return c.replace(/\D/g, '').length >= 7 && /^[\d+\s().-]+$/.test(c) ? '' : 'Please enter a valid mobile number (e.g. 0917 123 4567).'; }
+    case 'sex': return v.sex ? '' : 'Please choose Boy or Girl.';
     case 'ministry': return v.ministry ? '' : 'Please choose a ministry.';
+    case 'invited_by': { const t = tidy(v.invited_by); if (!t) return ''; return /^[\p{L}\p{M}][\p{L}\p{M}\s.,'’&/()-]*$/u.test(t) ? '' : 'Please enter the name of the person who invited you.'; }
     case 'leader_name': return tidy(v.leader_name) ? '' : "Please enter your leader's name.";
     case 'network_leader_name': return tidy(v.network_leader_name) ? '' : "Please enter your network leader's name.";
     default: return '';
@@ -64,11 +92,13 @@ function validateField(name) {
 function values() {
   const o = {};
   for (const f of FIELDS) o[f] = form.elements[f] ? form.elements[f].value : '';
+  if (FIELDS.includes('sex')) o.sex = form.querySelector('input[name=sex]:checked')?.value || '';
   o.website = form.elements.website.value;
   return o;
 }
 function showError(name, msg) {
-  const el = form.elements[name];
+  let el = form.elements[name];
+  if (el && typeof el.setAttribute !== 'function') el = el[0] || null; // radio group (RadioNodeList) → first radio
   const box = $(`[data-error-for="${name}"]`);
   if (box) box.textContent = msg || '';
   if (el) { el.setAttribute('aria-invalid', msg ? 'true' : 'false'); el.closest('.field')?.classList.toggle('is-invalid', Boolean(msg)); }
@@ -106,7 +136,7 @@ function renderReview() {
   $('#regSubmitError').hidden = true;
   $('#regSubmit').disabled = !allValid();
 }
-function f2(f, v) { return f === 'email' ? tidy(v).toLowerCase() : tidy(v); }
+function f2(f, v) { return f === 'email' ? tidy(v).toLowerCase() : f === 'sex' ? (v === 'male' ? 'Boy' : v === 'female' ? 'Girl' : '') : tidy(v); }
 
 // ---- duplicate pre-check (booleans only; server re-checks on submit) ----
 let checkTimer = null;
@@ -124,7 +154,7 @@ async function runCheck() {
     lastCheck = { ...r, for_email: email, for_name: name.toLowerCase() };
     $('#nameWarn').hidden = !r.name_match;
     if (form.elements.email.value && !form.elements.email.matches(':focus')) showError('email', validateField('email'));
-    else if (r.email_taken) showError('email', validateField('email'));
+    else if (r.email_taken || r.email_problem) showError('email', validateField('email'));
     if (step === 3) renderReview();
   } catch { /* best effort — the submit is the real check */ }
 }
@@ -150,8 +180,8 @@ async function submit() {
   $('#regSubmitError').hidden = true;
   const v = values();
   const body = {};
-  for (const f of FIELDS) body[f] = f2(f, v[f]);
-  body.age = Number(body.age);
+  for (const f of FIELDS) body[f] = f === 'sex' ? v.sex : f2(f, v[f]);
+  if (FIELDS.includes('age')) body.age = Number(body.age);
   body.website = v.website;
   body.form_token = formToken;
   if (QR_TOKEN) body.qr_token = QR_TOKEN;
@@ -230,10 +260,11 @@ function setupPickers() {
   function build(pickId, manualId, name, items, render, onPick) {
     const pick = $(pickId), manual = $(manualId), list = $('.reg-pick__list', pick), other = $('.reg-pick__other', pick), search = $('.reg-pick__search', pick);
     if (!items.length) return; // nothing to tap → plain text box as before
+    items = [...items, { name: NA, na: true }]; // always offer "N/A" (no leader yet)
     const current = () => tidy(form.elements[name].value).toLowerCase();
     const draw = () => {
       const q = search ? tidy(search.value).toLowerCase() : '';
-      const rows = items.filter((it) => !q || it.name.toLowerCase().includes(q) || (it.network_leader || '').toLowerCase().includes(q));
+      const rows = items.filter((it) => it.na || !q || it.name.toLowerCase().includes(q) || (it.network_leader || '').toLowerCase().includes(q));
       list.innerHTML = rows.length ? rows.map((it, i) => `<button type="button" class="reg-pick__opt ${it.name.toLowerCase() === current() ? 'is-selected' : ''}" data-i="${items.indexOf(it)}" role="option" aria-selected="${it.name.toLowerCase() === current()}">${render(it)}</button>`).join('')
         : '<div class="reg-pick__empty">No name matches. Tap “Not on the list” to type it.</div>';
     };
@@ -252,11 +283,14 @@ function setupPickers() {
     return { draw, show: () => { pick.hidden = false; manual.hidden = true; draw(); } };
   }
 
+  const naRow = (what) => `<span><b>${NA}</b><span class="reg-pick__sub">No ${what} yet</span></span>`;
   const netPick = build('#networkPick', '#networkManual', 'network_leader_name', nets,
-    (it) => `<span><b>${esc(it.name)}</b><span class="reg-pick__sub">Network leader</span></span>${tag(it.gender)}`);
+    (it) => it.na ? naRow('network leader') : `<span><b>${esc(it.name)}</b><span class="reg-pick__sub">Network leader</span></span>${tag(it.gender)}`);
   build('#leaderPick', '#leaderManual', 'leader_name', leaders,
-    (it) => `<span><b>${esc(it.name)}</b><span class="reg-pick__sub">${it.network_leader ? 'Network leader: ' + esc(it.network_leader) : 'Lifegroup leader'}</span></span>${tag(it.gender)}`,
-    (it) => { if (it.network_leader) { set('network_leader_name', it.network_leader); if (netPick) netPick.show(); } });
+    (it) => it.na ? naRow('leader') : `<span><b>${esc(it.name)}</b><span class="reg-pick__sub">${it.network_leader ? 'Network leader: ' + esc(it.network_leader) : 'Lifegroup leader'}</span></span>${tag(it.gender)}`,
+    (it) => { if (it.na) { set('network_leader_name', NA); if (netPick) netPick.show(); } else if (it.network_leader) { set('network_leader_name', it.network_leader); if (netPick) netPick.show(); } });
+  // "N/A" buttons under the typed boxes (shown when there is nothing to tap, or after "Not on the list")
+  $$('[data-na]').forEach((b) => { b.addEventListener('click', () => { set(b.dataset.na, NA); if (b.dataset.na === 'leader_name' && !tidy(form.elements.network_leader_name.value)) set('network_leader_name', NA); }); });
 }
 
 function fillList(id, items) {
@@ -288,6 +322,7 @@ async function boot() {
   fillList('#schoolList', options.schools);
   fillList('#leaderList', options.leaders);
   fillList('#networkLeaderList', options.network_leaders);
+  applyAskedFields(options.fields);
   loadDraft();
   setupPickers();
   form.hidden = false;
@@ -295,7 +330,7 @@ async function boot() {
   form.addEventListener('input', (e) => {
     const name = e.target.name;
     if (name && e.target.getAttribute('aria-invalid') === 'true') showError(name, validateField(name));
-    if (name === 'email' || name === 'full_name') { if (name === 'email') lastCheck = { ...lastCheck, email_taken: false }; scheduleCheck(); }
+    if (name === 'email' || name === 'full_name') { if (name === 'email') lastCheck = { ...lastCheck, email_taken: false, email_problem: null }; scheduleCheck(); }
     if (step === 3) $('#regSubmit').disabled = !allValid();
     saveDraft();
   });

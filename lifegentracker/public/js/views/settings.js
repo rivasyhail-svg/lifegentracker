@@ -87,24 +87,54 @@ export async function renderSettings({ main }) {
     });
   };
 
-  // ----- Attendance & Lifegroup rules ---------------------------------------
+  // ----- Customize: sections, permissions, structure, QR form ----------------
   const rules = main.querySelector('#rulesCard');
-  const lockOn = state.settings.attendance_sunday_lock !== '0';
+  const on = (k, d = '1') => (state.settings[k] === undefined ? d : state.settings[k]) !== '0';
+  const tog = (name, label, d = '1', extra = '') => `<label class="toggle"><input type="checkbox" name="${name}" ${on(name, d) ? 'checked' : ''} ${extra} /> ${label}</label>`;
+  const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const openDays = String(state.settings.qr_window_days ?? '0').split(',').map((x) => x.trim()).filter(Boolean);
+  const srv = state.standalone ? 'disabled' : '';
   rules.innerHTML = html`
-    <div class="card__header"><h2>Attendance &amp; Lifegroup rules</h2></div>
+    <div class="card__header"><h2>Customize</h2></div>
     <div class="card__body"><form id="rulesForm" class="form-grid" novalidate>
-      <div class="field span-2"><label class="toggle"><input type="checkbox" name="attendance_sunday_lock" ${lockOn ? 'checked' : ''} ${state.standalone ? 'disabled' : ''} /> Sunday-only attendance marking${state.standalone ? ' <span class="badge badge--nodot">Server only</span>' : ''}</label>
-        </div>
-      <div class="field"><label>Solid Lifegroup target</label><input name="lifegroup_solid_target" type="number" min="1" max="50" value="${state.settings.lifegroup_solid_target || '6'}" required /></div>
+      <div class="field span-2"><label>Sections</label>
+        <div class="stack-sm">${raw(tog('module_lifegroups', 'Lifegroups &amp; Networks'))}${raw(tog('module_reports', 'Reports'))}${raw(tog('module_registrations', 'QR Registration', '1', srv))}</div></div>
+      <div class="field span-2"><label>Attendance Staff can also</label>
+        <div class="stack-sm">${raw(tog('perm_staff_lifegroups', 'Manage Lifegroups &amp; Networks'))}${raw(tog('perm_staff_registrations', 'Review &amp; approve QR registrations', '0', srv))}${raw(tog('perm_staff_attendance_correct', 'Correct past Sundays (reason still required)', '0', srv))}</div></div>
+      <div class="field span-2"><label>Viewer can also</label>
+        <div class="stack-sm">${raw(tog('perm_viewer_private', 'See contact details, birthdays and notes', '0'))}</div></div>
+      <div class="field span-2"><label>Attendance</label>
+        <div class="stack-sm">${raw(tog('attendance_sunday_lock', 'Mark PRESENT on the actual Sunday only', '1', srv))}</div></div>
+      <div class="field"><label>Closed cell (solid) size</label><input name="lifegroup_solid_target" type="number" min="1" max="50" value="${state.settings.lifegroup_solid_target || '6'}" required /></div>
+      <div class="field"><label>Cell leaders per Network leader</label><input name="network_leader_max" type="number" min="1" max="100" value="${state.settings.network_leader_max || '6'}" required /></div>
+      ${state.standalone ? '' : html`
+      <div class="field span-2"><label>QR form asks for</label>
+        <div class="stack-sm"><label class="toggle"><input type="checkbox" checked disabled /> Full name &amp; Email (always)</label>${raw(tog('qr_ask_age', 'Age'))}${raw(tog('qr_ask_school', 'School'))}${raw(tog('qr_ask_ministry', 'Ministry'))}${raw(tog('qr_ask_leader', 'Leader &amp; Network leader (tap-to-pick)'))}${raw(tog('qr_ask_contact', 'Contact number', '0'))}${raw(tog('qr_ask_sex', 'Boy / Girl', '0'))}</div></div>
+      <div class="field span-2"><label>QR form open on</label>
+        <div class="row" style="gap:6px 14px;flex-wrap:wrap">${DAYS.map((d, i) => html`<label class="toggle"><input type="checkbox" name="qr_day" value="${i}" ${openDays.includes(String(i)) ? 'checked' : ''} /> ${d}</label>`)}</div>
+        <div class="row mt-1" style="gap:8px;align-items:center;flex-wrap:wrap"><input name="qr_window_start" type="time" value="${state.settings.qr_window_start || '12:00'}" style="max-width:140px" /><span class="small muted">to</span><input name="qr_window_end" type="time" value="${state.settings.qr_window_end || '17:00'}" style="max-width:140px" /><label class="toggle" style="margin-left:8px"><input type="checkbox" name="qr_always" ${state.settings.qr_window === 'always' ? 'checked' : ''} /> Always open</label></div></div>`}
       <div class="span-2 form-actions"><button class="btn btn--primary" type="submit">Save</button></div>
     </form></div>`;
   rules.querySelector('#rulesForm').onsubmit = async (e) => {
     e.preventDefault();
-    await withLoading(e.target.querySelector('button[type=submit]'), async () => {
+    const f = e.target;
+    await withLoading(f.querySelector('button[type=submit]'), async () => {
       try {
-        const s = await api.saveSettings({ attendance_sunday_lock: e.target.attendance_sunday_lock.checked ? '1' : '0', lifegroup_solid_target: e.target.lifegroup_solid_target.value.trim() });
+        const body = { lifegroup_solid_target: f.lifegroup_solid_target.value.trim(), network_leader_max: f.network_leader_max.value.trim() };
+        for (const k of ['module_lifegroups', 'module_reports', 'module_registrations', 'perm_staff_lifegroups', 'perm_staff_registrations', 'perm_staff_attendance_correct', 'perm_viewer_private', 'attendance_sunday_lock', 'qr_ask_age', 'qr_ask_school', 'qr_ask_ministry', 'qr_ask_leader', 'qr_ask_contact', 'qr_ask_sex']) {
+          if (f.elements[k] && !f.elements[k].disabled) body[k] = f.elements[k].checked ? '1' : '0';
+        }
+        if (f.elements.qr_day) {
+          const days = [...f.querySelectorAll('input[name=qr_day]:checked')].map((x) => x.value);
+          if (!days.length && !f.qr_always.checked) throw new Error('Pick at least one day the QR form is open, or tick Always open.');
+          body.qr_window_days = days.length ? days.join(',') : '0';
+          body.qr_window = f.qr_always.checked ? 'always' : 'sunday';
+          body.qr_window_start = f.qr_window_start.value || '12:00'; body.qr_window_end = f.qr_window_end.value || '17:00';
+        }
+        const s = await api.saveSettings(body);
         Object.assign(state.settings, s);
-        toast('Rules saved.');
+        toast('Saved.');
+        window.dispatchEvent(new CustomEvent('lifegen:settings-changed'));
       } catch (err) { toast(err.message, 'error'); }
     });
   };

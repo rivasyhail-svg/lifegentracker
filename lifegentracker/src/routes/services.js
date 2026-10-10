@@ -85,7 +85,7 @@ function lockState(db, user, serviceDate) {
   const enabled = s.attendance_sunday_lock !== '0';
   const now = guard.churchNow(s.qr_timezone || 'Asia/Manila');
   const live = now.dow === 0 && now.date === serviceDate;
-  const admin = can(user, 'settings:manage');
+  const admin = can(user, 'attendance:correct');
   return {
     enabled, live: !enabled || live, can_correct: admin, church_date: now.date, church_day: guard.DAY_NAMES[now.dow],
     message: enabled && !live ? (admin ? 'Correction mode — this is not today\'s Sunday, so every change needs a reason and is logged.'

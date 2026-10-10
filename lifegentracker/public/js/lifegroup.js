@@ -26,6 +26,7 @@ const TIER = { solid: 'Closed cell', new: 'Open cell' };
 let d = null;
 let view = null; // network leaders: 'leaders' | 'report'; regular leaders: always 'report' (one page)
 let draft = { date: null, held: true, present: new Set(), devotion: new Set(), newbies: [] };
+const openLeaders = new Set(); // which cell-leader rows are expanded (kept across re-renders)
 
 /** Four small cells: LG attended / devotion for each of the last 4 weeks. */
 function dots(last4) {
@@ -58,8 +59,19 @@ function cellLeadersView() {
   const heldBadge = (g) => !g ? '' : g.this_week === 'held' ? '<span class="badge badge--present badge--nodot cl__held">Held LG</span>' : g.this_week === 'skip' ? '<span class="badge badge--absent badge--nodot cl__held">No LG</span>' : '<span class="badge badge--nodot cl__held">No report</span>';
   const strip = (g) => `<div class="wk wk--sm" aria-label="Their Lifegroup, last ${g.calendar.length} weeks">${g.calendar.map((w) => { const m = w.meeting; return `<span class="wk__c ${!m ? 'wk__c--none' : m.held ? 'wk__c--held' : 'wk__c--skip'}" title="Week of ${weekLabel(w.week_start)}: ${!m ? 'no report' : m.held ? m.present + ' present' : 'no Lifegroup'}">${m && m.held ? m.present : m ? '×' : ''}</span>`; }).join('')}</div>`;
   const recent = (g) => g.recent && g.recent.length ? `<ul class="cl__recent">${g.recent.map((m) => `<li><b>${fmtDate(m.meeting_date)}</b> — ${m.held ? `${m.present_count} present${m.present.length ? `: ${esc(m.present.join(', '))}` : ''}` : `no Lifegroup${m.no_meeting_reason ? ` (${esc(m.no_meeting_reason)})` : ''}`}</li>`).join('')}</ul>` : '<div class="small muted">No report yet from this leader.</div>';
-  const item = (r) => `<details class="cl">
-      <summary class="cl__sum"><span class="cl__name">${esc(r.name)}</span>${heldBadge(r.group)}${r.last4 ? dots(r.last4) : '<span class="small muted">—</span>'}</summary>
+  const marks = (d.this_week && d.this_week.marks) || {};
+  const pa = (r) => {
+    if (typeof r.id !== 'number') return '';
+    const st = marks[r.id] || null;
+    return `<span class="pa" role="group" aria-label="${esc(r.name)} — this week">
+      <button type="button" class="btn btn--sm btn--present ${st === 'present' ? 'is-on' : ''}" data-mark="present" data-person="${r.id}" aria-pressed="${st === 'present'}">Present</button>
+      <button type="button" class="btn btn--sm btn--absent ${st === 'absent' ? 'is-on' : ''}" data-mark="absent" data-person="${r.id}" aria-pressed="${st === 'absent'}">Absent</button>
+    </span>`;
+  };
+  const item = (r) => `<div class="cl ${openLeaders.has(String(r.id)) ? 'is-open' : ''}" data-leader="${r.id}">
+      <div class="cl__sum" role="button" tabindex="0" aria-expanded="${openLeaders.has(String(r.id))}" data-toggle="${r.id}"><span class="cl__name">${esc(r.name)}</span>${heldBadge(r.group)}${r.last4 ? dots(r.last4) : '<span class="small muted">—</span>'}</div>
+      <div class="cl__pa">${pa(r)}<span class="small muted">${d.this_week && d.this_week.meeting_date ? `This week · ${fmtDate(d.this_week.meeting_date)}` : 'This week · not marked yet'}</span></div>
+      <div class="cl__detail" ${openLeaders.has(String(r.id)) ? '' : 'hidden'}>
       ${r.group ? `<div style="padding:6px 12px 0">
           <div class="small muted">${esc(r.group.name)} · ${r.group.total} member${r.group.total === 1 ? '' : 's'} · Closed cell ${r.group.solid} / ${r.group.target}${r.group.solid >= r.group.target ? ' (solid ✓)' : ''} · Open cell ${r.group.total - r.group.solid}</div>
           <div class="row row--between mt-1" style="gap:8px;align-items:center"><span class="small"><b>Their Lifegroup</b> · ${r.group.held_last_4}/4 held</span>${strip(r.group)}</div>
@@ -67,33 +79,14 @@ function cellLeadersView() {
         </div>
         <div class="cells" style="margin-top:8px;border-top:1px solid var(--border)">${cell(r.group, 'new', r.group.other_members)}${cell(r.group, 'solid', r.group.solid_members)}</div>`
       : '<div class="small muted" style="padding:8px 12px 10px">No Lifegroup of their own yet.</div>'}
-    </details>`;
+      </div>
+    </div>`;
   return `
     <section class="card reg-card" style="padding:0;overflow:hidden">
-      <div class="row row--between" style="padding:14px 16px 10px"><b>My cell leaders</b><span class="small muted">${rows.length}${d.max_members ? ` / ${d.max_members} (max ${d.max_members})` : ''} · ${net.summary.met_this_week}/${net.summary.groups} met this week</span></div>
+      <div class="row row--between" style="padding:14px 16px 4px"><b>My cell leaders</b><span class="small muted">${rows.length}${d.max_members ? ` / ${d.max_members}` : ''} · ${net.summary.met_this_week}/${net.summary.groups} met this week</span></div>
+      <p class="small muted" style="padding:0 16px 10px;margin:0">Tap <b>Present</b> or <b>Absent</b> for this week's Lifegroup — it is saved right away and can be changed. Open a name to see their own members and move them between Open cell and Closed cell.</p>
       ${rows.length ? rows.map(item).join('') : '<p class="small muted" style="padding:0 16px 14px">No cell leaders yet.</p>'}
     </section>`;
-}
-
-/** The church structure, always visible so the leader knows the limits:
- *  Network leader → max 6 cell leaders → each: Closed cell max 6 (= solid Lifegroup) + Open cell (no limit). */
-function structureStrip() {
-  const net = d.network;
-  const t = d.target || 6;
-  const max = d.max_members || 6;
-  const solid = d.members.filter((m) => m.tier === 'solid').length;
-  if (net) {
-    const full = d.members.length >= max;
-    return `<section class="card reg-card struct" aria-label="Structure">
-      <div class="struct__row"><span class="struct__tag">Network leader</span><b>${esc(d.group.leader_name || 'You')}</b></div>
-      <div class="struct__row struct__row--in"><span class="struct__tag">Cell leaders</span><b class="${full ? 'struct__full' : ''}">${d.members.length} / ${max}</b><span class="small muted">max ${max}</span></div>
-      <div class="struct__row struct__row--in2"><span class="struct__tag">Each cell leader</span><span class="small"><b>Closed cell</b> max ${t} · <b>Open cell</b> no limit</span></div>
-    </section>`;
-  }
-  return `<section class="card reg-card struct" aria-label="Structure">
-    <div class="struct__row"><span class="struct__tag">Closed cell</span><b class="${solid >= t ? 'struct__ok' : ''}">${solid} / ${t}</b><span class="small muted">${solid >= t ? 'solid ✓' : 'max ' + t}</span></div>
-    <div class="struct__row"><span class="struct__tag">Open cell</span><b>${d.members.length - solid}</b><span class="small muted">no limit</span></div>
-  </section>`;
 }
 
 function render() {
@@ -156,7 +149,7 @@ function render() {
       ${d.recent.length ? `<details class="mt-1"><summary class="small"><b>Recent reports</b></summary><ul class="small" style="margin:6px 0 0;padding-left:18px;line-height:1.7">${d.recent.map((m) => `<li><b>${fmtDate(m.meeting_date)}</b> — ${m.held ? `${m.present_count} present` : `no Lifegroup (${esc(m.no_meeting_reason || '')})`}</li>`).join('')}</ul></details>` : ''}
     </section>`;
 
-  body.innerHTML = tabs + structureStrip() + (view === 'leaders' && net ? cellLeadersView() : reportView);
+  body.innerHTML = tabs + (view === 'leaders' && net ? cellLeadersView() : reportView);
   body.querySelectorAll('[data-view]').forEach((b) => { b.onclick = (e) => { e.preventDefault(); view = b.dataset.view; render(); window.scrollTo(0, 0); }; });
   if (view !== 'report') { bindTier(); return; }
 
@@ -204,6 +197,22 @@ function render() {
 }
 
 function bindTier() {
+  body.querySelectorAll('[data-toggle]').forEach((h) => {
+    const go = () => { const id = h.dataset.toggle; const row = h.closest('.cl'); const open = !openLeaders.has(id); if (open) openLeaders.add(id); else openLeaders.delete(id); row.classList.toggle('is-open', open); row.querySelector('.cl__detail').hidden = !open; h.setAttribute('aria-expanded', String(open)); };
+    h.onclick = go; h.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } };
+  });
+  body.querySelectorAll('[data-mark]').forEach((b) => {
+    b.onclick = async (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const wrap = b.closest('.pa'); wrap.querySelectorAll('button').forEach((x) => { x.disabled = true; });
+      try {
+        const r = await call('POST', `/api/public/lifegroup/${encodeURIComponent(token)}/attendance`, { person_id: Number(b.dataset.person), status: b.dataset.mark });
+        d.this_week = r.this_week; if (r.recent) d.recent = r.recent;
+        toast(r.status === 'present' ? 'Marked present.' : 'Marked absent.', r.status === 'present' ? 'success' : 'info');
+        render();
+      } catch (ex) { toast(ex.message, 'error'); wrap.querySelectorAll('button').forEach((x) => { x.disabled = false; }); if (ex.status === 404) setTimeout(load, 1500); }
+    };
+  });
   body.querySelectorAll('[data-tier]').forEach((b) => {
     b.onclick = async () => {
       b.disabled = true;

@@ -115,9 +115,9 @@ export async function renderRegistrations({ main, query }) {
           ${data.items.map((r) => html`<tr class="clickable" data-id="${r.id}">
             ${filters.status === 'pending' ? html`<td data-label="">${r.status === 'pending' ? html`<input type="checkbox" data-sel="${r.id}" aria-label="Select ${r.full_name}" ${selected.has(r.id) ? 'checked' : ''} />` : ''}</td>` : ''}
             <td data-label="Name" class="nowrap"><div class="name">${r.full_name}</div><div class="small muted">${r.email}</div><div class="code">${r.ref_code || ''}${r.possible_duplicate ? raw(' <span class="badge badge--nodot reg-flag" title="Same name as someone already registered">Possible duplicate</span>') : ''} ${riskBadges(r)}</div></td>
-            <td data-label="Age · School" class="small nowrap">${r.age} · ${r.school}</td>
-            <td data-label="Leader" class="small nowrap">${r.leader_name}<br><span class="muted">${r.network_leader_name}</span></td>
-            <td data-label="Ministry" class="small nowrap">${r.ministry}</td>
+            <td data-label="Age · School" class="small nowrap">${[r.age || '', r.school || ''].filter(Boolean).join(' · ') || '—'}</td>
+            <td data-label="Leader" class="small nowrap">${r.leader_name || '—'}<br><span class="muted">${r.network_leader_name || ''}</span></td>
+            <td data-label="Ministry" class="small nowrap">${r.ministry || '—'}</td>
             <td data-label="Submitted" class="small nowrap">${fmtDateTime(r.submitted_at)}</td>
             <td data-label="Status" class="nowrap">${statusBadge(r.status)}${r.status === 'approved' && r.person_code ? html`<div class="small"><a href="#/people/${r.person_id}">${r.person_code}</a>${r.reviewed_by_name ? html` <span class="muted">· ${r.reviewed_by_name}</span>` : ''}</div>` : ''}${r.status === 'rejected' && r.reviewed_by_name ? html`<div class="small muted">by ${r.reviewed_by_name}</div>` : ''}</td>
             ${filters.status === 'pending' ? '' : html`<td data-label="Lifegroup" class="small nowrap">${r.status === 'approved' && r.lifegroup_name ? html`<a href="#/lifegroups/${r.lifegroup_id}">${r.lifegroup_name}</a>` : r.status === 'approved' && r.person_id ? html`<a class="badge badge--nodot" href="#/people/${r.person_id}" title="No Lifegroup leader matched the name typed on the form — assign from the profile">Needs Lifegroup</a>` : raw('<span class="muted">—</span>')}</td>`}
@@ -196,8 +196,8 @@ async function openRegistration(id, reload, opts = {}) {
           ${r.status !== 'pending' && r.reviewed_by_name ? html`<span class="small muted">${r.status === 'approved' ? 'Approved' : 'Rejected'} by ${r.reviewed_by_name} · ${fmtDateTime(r.approved_at || r.rejected_at)}</span>` : ''}</div>
         ${r.review_note ? html`<div class="alert alert--info">${icon('info', 18)}<span>Note: ${r.review_note}</span></div>` : ''}
         <dl class="review-grid">
-          ${row('Full name', r.full_name)}${row('Email', r.email)}${row('Age', r.age)}${row('School', r.school)}
-          ${row('Ministry', r.ministry)}${row('Leader', r.leader_name)}${row('Network leader', r.network_leader_name)}
+          ${row('Full name', r.full_name)}${row('Email', r.email)}${r.contact_number ? row('Contact number', r.contact_number) : ''}${r.sex ? row('Boy / Girl', r.sex === 'male' ? 'Boy' : 'Girl') : ''}${r.age ? row('Age', r.age) : ''}${r.school ? row('School', r.school) : ''}
+          ${r.ministry ? row('Ministry', r.ministry) : ''}${r.leader_name ? row('Leader', r.leader_name) : ''}${r.network_leader_name ? row('Network leader', r.network_leader_name) : ''}${r.invited_by ? row('Invited by', r.invited_by) : ''}
           ${r.person_code ? row('Person record', html`<a href="#/people/${r.person_id}">${r.person_code}</a>`) : ''}
           ${row('Form time', r.form_seconds != null ? `${r.form_seconds} s` : '—')}${row('Device', r.device_id ? html`<span class="code" title="Anonymous device id (cookie) — not personal data">${r.device_id.slice(0, 8)}…</span>` : '—')}
         </dl>
@@ -270,12 +270,15 @@ function editDialog(r, reload) {
     body: html`<form id="editReg" class="form-grid" novalidate>
       <div class="field span-2"><label>Full name <span class="req">*</span></label><input name="full_name" value="${r.full_name}" required maxlength="120" /></div>
       <div class="field"><label>Email <span class="req">*</span></label><input name="email" type="email" value="${r.email}" required maxlength="160" /></div>
-      <div class="field"><label>Age <span class="req">*</span></label><input name="age" type="number" min="5" max="100" step="1" value="${r.age}" required /></div>
-      <div class="field span-2"><label>School <span class="req">*</span></label><input name="school" value="${r.school}" required maxlength="120" /></div>
-      <div class="field"><label>Leader <span class="req">*</span></label><input name="leader_name" value="${r.leader_name}" required maxlength="120" /></div>
-      <div class="field"><label>Network leader <span class="req">*</span></label><input name="network_leader_name" value="${r.network_leader_name}" required maxlength="120" /></div>
-      <div class="field span-2"><label>Ministry <span class="req">*</span></label>
-        ${ministries.length ? html`<select name="ministry">${ministries.map((m) => html`<option value="${m}" ${m === r.ministry ? 'selected' : ''}>${m}</option>`)}</select>` : html`<input name="ministry" value="${r.ministry}" required />`}
+      <div class="field"><label>Contact number</label><input name="contact_number" type="tel" value="${r.contact_number || ''}" maxlength="40" /></div>
+      <div class="field"><label>Boy / Girl</label><select name="sex"><option value="" ${!r.sex ? 'selected' : ''}>—</option><option value="male" ${r.sex === 'male' ? 'selected' : ''}>Boy</option><option value="female" ${r.sex === 'female' ? 'selected' : ''}>Girl</option></select></div>
+      <div class="field"><label>Age</label><input name="age" type="number" min="5" max="100" step="1" value="${r.age || ''}" /></div>
+      <div class="field"><label>School</label><input name="school" value="${r.school || ''}" maxlength="120" /></div>
+      <div class="field"><label>Leader</label><input name="leader_name" value="${r.leader_name || ''}" maxlength="120" /></div>
+      <div class="field"><label>Network leader</label><input name="network_leader_name" value="${r.network_leader_name || ''}" maxlength="120" /></div>
+      <div class="field"><label>Invited by <span class="opt">optional</span></label><input name="invited_by" value="${r.invited_by || ''}" maxlength="120" /></div>
+      <div class="field span-2"><label>Ministry</label>
+        ${ministries.length ? html`<select name="ministry"><option value="" ${!r.ministry ? 'selected' : ''}>—</option>${ministries.map((m) => html`<option value="${m}" ${m === r.ministry ? 'selected' : ''}>${m}</option>`)}</select>` : html`<input name="ministry" value="${r.ministry || ''}" />`}
       </div>
     </form>`.toString(),
     footer: '<button class="btn" data-close>Cancel</button><button class="btn btn--primary" form="editReg" type="submit">Save</button>',
@@ -338,7 +341,7 @@ export async function renderQrCard(card) {
           <select name="qr_mode"><option value="reusable" ${!rotating ? 'selected' : ''}>Reusable — one print, works every week</option><option value="rotating" ${rotating ? 'selected' : ''}>Rotating — new code every week (Mon–Sun)</option></select>
 </div>
         <div class="field"><label>When the form is open</label>
-          <select name="qr_window"><option value="sunday" ${g.window === 'sunday' ? 'selected' : ''}>Sundays only, between the times below</option><option value="always" ${g.window === 'always' ? 'selected' : ''}>Always open</option></select>
+          <select name="qr_window"><option value="sunday" ${g.window === 'sunday' ? 'selected' : ''}>Open days (Settings → Customize), between the times below</option><option value="always" ${g.window === 'always' ? 'selected' : ''}>Always open</option></select>
           <span class="help">Church time zone: <code>${g.timezone}</code> · now ${g.church_time}</span></div>
         <div class="field"><label>Opens at</label><input name="qr_window_start" type="time" value="${g.window_start}" required /></div>
         <div class="field"><label>Closes at</label><input name="qr_window_end" type="time" value="${g.window_end}" required /></div>

@@ -27,13 +27,53 @@ const PERMISSIONS = {
   'settings:manage':     ['admin'],
 };
 
+// Admin-customisable extras (Settings → Customize). Each setting grants one role one extra permission.
+const PERMISSION_OPTIONS = {
+  perm_staff_registrations: { role: 'staff', permissions: ['registrations:manage'] },
+  perm_staff_attendance_correct: { role: 'staff', permissions: ['attendance:correct'] },
+  perm_staff_lifegroups: { role: 'staff', permissions: ['lifegroups:manage'] },
+  perm_viewer_private: { role: 'viewer', permissions: ['people:view_private'] },
+};
+PERMISSIONS['attendance:correct'] = ['admin'];
+PERMISSIONS['lifegroups:manage'] = ['admin']; // staff get it through perm_staff_lifegroups (default on)
+const DEFAULT_OPTIONS = { perm_staff_lifegroups: '1' };
+let optionValues = { ...DEFAULT_OPTIONS };
+const MODULES = { lifegroups: 'module_lifegroups', registrations: 'module_registrations', reports: 'module_reports' };
+let moduleValues = {};
+
+/** Re-read the customisable permission / module settings (called at startup and after every settings update). */
+function refreshOptions(db) {
+  try {
+    const keys = [...Object.keys(PERMISSION_OPTIONS), ...Object.values(MODULES)];
+    const rows = db.prepare(`SELECT key, value FROM settings WHERE key IN (${keys.map(() => '?').join(',')})`).all(...keys);
+    const next = { ...DEFAULT_OPTIONS }; const mods = {};
+    for (const r of rows) { if (PERMISSION_OPTIONS[r.key]) next[r.key] = r.value; else mods[r.key] = r.value; }
+    optionValues = next; moduleValues = mods;
+  } catch { /* settings table not ready yet (first migration) */ }
+}
+const on = (v) => v !== undefined && v !== '0' && v !== 'false' && v !== '';
+
 function can(user, permission) {
+  if (!user) return false;
   const roles = PERMISSIONS[permission];
-  return Boolean(user && roles && roles.includes(user.role_id));
+  if (roles && roles.includes(user.role_id)) return true;
+  return Object.entries(PERMISSION_OPTIONS).some(([k, o]) => o.role === user.role_id && o.permissions.includes(permission) && on(optionValues[k]));
 }
 
 function permissionsFor(user) {
   return Object.keys(PERMISSIONS).filter((p) => can(user, p));
+}
+
+/** Is a feature section switched on? (default on) */
+function moduleOn(name) {
+  const key = MODULES[name];
+  if (!key) return true;
+  const v = moduleValues[key];
+  return v === undefined || on(v);
+}
+/** Express middleware: 404 for every route of a switched-off section. */
+function requireModule(name) {
+  return (req, res, next) => (moduleOn(name) ? next() : next(new HttpError(404, 'This section is switched off in Settings → Customize.')));
 }
 
 // ---------------------------------------------------------------------------
@@ -211,5 +251,4 @@ module.exports = {
   AUTH_DISABLED, PERMISSIONS, can, permissionsFor,
   hashPassword, verifyPassword, validatePassword,
   createSession, destroySession, destroyAllSessions,
-  attachUser, requireAuth, requirePermission, loginThrottle,
-};
+  attachUser, requireAuth, requirePermission, loginThrottle, refreshOptions, moduleOn, requireModule, PERMISSION_OPTIONS, MODULES };
