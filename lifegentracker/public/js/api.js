@@ -171,7 +171,8 @@ export const api = {
   // Lifegroup progress
   lifegroupProgress: (id, weeks) => request('GET', `/api/lifegroups/${id}/progress${weeks ? `?weeks=${weeks}` : ''}`),
   progressOverview: (weeks) => request('GET', `/api/lifegroups/progress/overview${weeks ? `?weeks=${weeks}` : ''}`),
-  networkCalendar: (id, weeks) => request('GET', `/api/networks/${id}/calendar${weeks ? `?weeks=${weeks}` : ''}`),
+  networkCalendar: (id, weeks, { members = false } = {}) => request('GET', `/api/networks/${id}/calendar?weeks=${weeks || 8}${members ? '&members=1' : ''}`),
+  networkStats: () => request('GET', '/api/reports/network-status'),
   setTier: (groupId, personId, tier) => request('PUT', `/api/lifegroups/${groupId}/members/${personId}/tier`, { tier }),
   saveMeeting: (groupId, body) => request('POST', `/api/lifegroups/${groupId}/meetings`, body),
   deleteMeeting: (groupId, meetingId) => request('DELETE', `/api/lifegroups/${groupId}/meetings/${meetingId}`),

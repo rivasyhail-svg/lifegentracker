@@ -112,7 +112,7 @@ function withTotals(rows) {
 
 // GET /api/networks/:id/calendar — week-by-week: did the leader's own group and each group under it meet?
 router.get('/:id/calendar', requirePermission('lifegroups:view'), wrap((req, res) => {
-  res.json(prog.networkCalendar(getDb(), intId(req.params.id), { weeks: Math.min(Math.max(Number(req.query.weeks) || 8, 4), 26) }));
+  res.json(prog.networkCalendar(getDb(), intId(req.params.id), { weeks: Math.min(Math.max(Number(req.query.weeks) || 8, 4), 26), withMembers: req.query.members === '1' }));
 }));
 
 // GET /api/networks/:id — network + its groups (with leaders) + child networks
@@ -126,7 +126,7 @@ router.get('/:id', requirePermission('lifegroups:view'), wrap((req, res) => {
            (SELECT COUNT(*) FROM lifegroup_memberships m JOIN people p ON p.id = m.person_id WHERE m.lifegroup_id = g.id AND m.left_at IS NULL AND p.archived_at IS NULL) AS member_count
       FROM lifegroups g LEFT JOIN people lp ON lp.id = g.leader_person_id
      WHERE g.network_id = ? ORDER BY g.is_active DESC, g.name COLLATE NOCASE`).all(n.id);
-  const memberStmt = db.prepare(`SELECT p.id, p.person_code, p.first_name, p.last_name, p.photo, p.sex, p.status, m.role, m.joined_at
+  const memberStmt = db.prepare(`SELECT p.id, p.person_code, p.first_name, p.last_name, p.photo, p.sex, p.status, m.role, m.tier, m.joined_at
       FROM lifegroup_memberships m JOIN people p ON p.id = m.person_id
      WHERE m.lifegroup_id = ? AND m.left_at IS NULL AND p.archived_at IS NULL
      ORDER BY m.role = 'member', p.last_name COLLATE NOCASE, p.first_name COLLATE NOCASE`);

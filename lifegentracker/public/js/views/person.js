@@ -153,7 +153,6 @@ export async function renderPerson({ main }, id) {
 function lifegroupCard(p) {
   const g = p.lifegroup;
   const manage = can('lifegroups:manage') && !p.archived_at;
-  const prefs = [p.preferred_area, DAY_LABELS[p.preferred_day], TIME_LABELS[p.preferred_time], p.preferred_category].filter(Boolean).join(' · ');
   const hist = p.lifegroup_history || [];
   return html`<div class="card lg-card mb-2">
     <div class="card__header"><h2>Lifegroup</h2>
@@ -173,7 +172,7 @@ function lifegroupCard(p) {
           <div><dt>Status</dt><dd class="current">Active</dd></div>
         </dl>`
       : html`<div class="row row--between" style="flex-wrap:wrap">
-          <div><div><b>No Lifegroup yet</b></div><div class="small muted">${p.archived_at ? 'Archived people cannot be assigned.' : prefs ? `Prefers: ${prefs}` : 'Ask their preferred area, day and time, then find a matching group.'}</div></div>
+          <div><div><b>No Lifegroup yet</b></div><div class="small muted">${p.archived_at ? 'Archived people cannot be assigned.' : 'Assign them to their leader’s Lifegroup.'}</div></div>
         </div>`}
       ${leadershipBlock(p)}
       ${hist.length > (g ? 1 : 0) || (hist.length && !g) ? html`<details class="mt-2 small"><summary class="muted">History (${hist.length})</summary>

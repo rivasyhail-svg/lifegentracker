@@ -78,7 +78,7 @@ function groupOr404(token) {
   if (!g) throw new HttpError(404, 'This Lifegroup link is not valid anymore. Please ask the Lifegen admin for a new link.');
   return g;
 }
-const pubMember = (m) => ({ id: m.id, name: `${m.first_name} ${m.last_name}`, tier: m.tier, role: m.role, meetings_attended: m.meetings_attended, last_meeting_attended: m.last_meeting_attended });
+const pubMember = (m) => ({ id: m.id, name: `${m.first_name} ${m.last_name}`, tier: m.tier, role: m.role, meetings_attended: m.meetings_attended, devotions: m.devotions, last_meeting_attended: m.last_meeting_attended, last4: m.last4 });
 
 router.get('/lifegroup/:token', rateLimit('lg-get', 240), wrap((req, res) => {
   const db = getDb();
@@ -90,7 +90,9 @@ router.get('/lifegroup/:token', rateLimit('lg-get', 240), wrap((req, res) => {
     church_name: s.church_name, today: prog.churchToday(db, s), target: p.target, solid: p.solid, new_members: p.new_members, total: p.total, is_solid: p.is_solid, percent: p.percent,
     streak: p.streak, held_last_4: p.held_last_4, met_this_week: p.met_this_week, last_meeting: p.last_meeting,
     members: p.members.map(pubMember), calendar: p.calendar,
-    recent: prog.meetingsOf(db, g.id, 8).map((m) => ({ id: m.id, meeting_date: m.meeting_date, held: Boolean(m.held), present_count: m.present_count, topic: m.topic, no_meeting_reason: m.no_meeting_reason, present: m.present.map((x) => x.name) })),
+    recent: prog.meetingsOf(db, g.id, 6).map((m) => ({ id: m.id, meeting_date: m.meeting_date, held: Boolean(m.held), present_count: m.present_count, no_meeting_reason: m.no_meeting_reason, present: m.present.map((x) => x.name), present_ids: m.present.map((x) => x.id), devotion_ids: m.devotion.map((x) => x.id) })),
+    former: prog.formerMembers(db, g.id).map((m) => ({ id: m.id, name: `${m.first_name} ${m.last_name}`, tier: m.tier, left_at: m.left_at })),
+    network: prog.leaderNetworkView(db, g.leader_person_id, { weeks: 4 }),
   });
 }));
 
@@ -109,6 +111,31 @@ router.put('/lifegroup/:token/members/:personId/tier', rateLimit('lg-tier', 120)
   prog.setTier(db, g.id, pid, String(req.body?.tier || ''), { via: 'leader_link', byName: g.leader_display || 'leader' });
   const p = prog.progress(db, g.id, { weeks: 8 });
   res.json({ ok: true, solid: p.solid, new_members: p.new_members, total: p.total, target: p.target, is_solid: p.is_solid, members: p.members.map(pubMember) });
+}));
+
+// Leader marks a member inactive (membership ends today) or brings a former member back.
+router.put('/lifegroup/:token/members/:personId/inactive', rateLimit('lg-tier', 120), wrap((req, res) => {
+  const db = getDb();
+  const g = groupOr404(req.params.token);
+  prog.leaveMember(db, g.id, Number(req.params.personId), { via: 'leader_link', byName: g.leader_display || 'leader' });
+  res.json({ ok: true });
+}));
+router.put('/lifegroup/:token/members/:personId/restore', rateLimit('lg-tier', 120), wrap((req, res) => {
+  const db = getDb();
+  const g = groupOr404(req.params.token);
+  prog.restoreMember(db, g.id, Number(req.params.personId), { via: 'leader_link', byName: g.leader_display || 'leader' });
+  res.json({ ok: true });
+}));
+
+// Network leader (via their own group's link) tags a member of one of the Lifegroups in their network as Solid / other.
+router.put('/lifegroup/:token/groups/:groupId/members/:personId/tier', rateLimit('lg-tier', 120), wrap((req, res) => {
+  const db = getDb();
+  const g = groupOr404(req.params.token);
+  const gid = Number(req.params.groupId), pid = Number(req.params.personId);
+  const ok = g.leader_person_id && db.prepare('SELECT 1 FROM lifegroups lg JOIN networks n ON n.id = lg.network_id WHERE lg.id = ? AND n.leader_person_id = ? AND n.is_active = 1').get(gid, g.leader_person_id);
+  if (!ok) throw new HttpError(403, 'That Lifegroup is not in your network.');
+  prog.setTier(db, gid, pid, String(req.body?.tier || ''), { via: 'leader_link', byName: `${g.leader_display || 'network leader'} (network leader)` });
+  res.json({ ok: true, network: prog.leaderNetworkView(db, g.leader_person_id, { weeks: 4 }) });
 }));
 
 module.exports = router;

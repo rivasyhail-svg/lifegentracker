@@ -66,7 +66,7 @@ router.post('/:id/approve', wrap((req, res) => {
   const body = req.body || {};
   const status = ['first_timer', 'returning', 'regular'].includes(body.status) ? body.status : 'first_timer';
   const personId = reg.approve(db, id, req.user, { mode: body.mode === 'link' ? 'link' : 'create', person_id: body.person_id, status });
-  res.json({ ...reg.get(db, id), person_id: personId });
+  res.json({ ...reg.get(db, id), person_id: personId, placed: reg.approve.lastPlacement || null });
 }));
 
 router.post('/:id/reject', wrap((req, res) => {

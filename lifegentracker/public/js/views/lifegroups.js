@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { renderProgressCard, renderNetworkCalendar, drawProgressTab, solidBadge, weekStrip } from './progress.js';
+import { renderProgressCard, renderNetworkCalendar, drawProgressTab, solidBadge, weekStrip, memberSections, memberDots, dotsKey, TIER_LABEL } from './progress.js';
 import { can } from '../app.js';
 import {
   html, raw, icon, avatar, fullName, statusBadge, fmtDate, emptyState, debounce, toast, confirmDialog,
@@ -87,7 +87,6 @@ async function groupForm(g, onSaved) {
         <span class="help" id="leaderHint"></span>
         <span class="help">Or type a name below if the leader is not registered yet.</span>
         <input name="leader_name" value="${v('leader_name')}" placeholder="Leader name (if not registered)" autocomplete="off" style="margin-top:6px" /></div>
-      <div class="field"><label>Area <span class="opt">optional</span></label><input name="area" value="${v('area')}" list="dlArea" autocomplete="off" placeholder="e.g. Kaybanban" />${dl('dlArea', opts.areas)}</div>
       <div class="field"><label>Category <span class="opt">optional</span></label><input name="category" value="${v('category')}" list="dlCat" autocomplete="off" placeholder="e.g. Students, Young Pro, Mixed" />${dl('dlCat', opts.categories)}</div>
       <div class="field"><label>Day <span class="opt">optional</span></label><select name="schedule_day"><option value="">—</option>${Object.entries(DAY_LABELS).map(([k, l]) => `<option value="${k}" ${g?.schedule_day === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
       <div class="field"><label>Time <span class="opt">optional</span></label><input name="schedule_time" type="time" value="${v('schedule_time')}" /></div>
@@ -154,7 +153,7 @@ export async function findLifegroup(person, onAssigned) {
         </div>
         <span class="small muted">${person.sex ? 'Only ' + (person.sex === 'male' ? 'boys' : 'girls') + ' groups are shown — groups are never mixed.' : 'Not set on the profile yet — choose one to see matching groups (it will be saved).'}</span>
       </div>
-      <div class="gsearch mb-2" style="max-width:none">${icon('search', 16).value}<input id="findQ" placeholder="Filter by group, leader, network or area…" autocomplete="off" aria-label="Filter Lifegroups" /></div>
+      <div class="gsearch mb-2" style="max-width:none">${icon('search', 16).value}<input id="findQ" placeholder="Filter by group, leader or network…" autocomplete="off" aria-label="Filter Lifegroups" /></div>
       <div id="recList"><div class="loading">Loading…</div></div>`,
     footer: `<button class="btn" data-close>Close</button>`,
   });
@@ -173,12 +172,12 @@ export async function findLifegroup(person, onAssigned) {
   function draw() {
     if (!all) return;
     const needle = q.value.trim().toLowerCase();
-    const groups = needle ? all.filter((g) => [g.name, g.leader_name, g.network, g.network_name, g.area, g.category].some((v) => v && String(v).toLowerCase().includes(needle))) : all;
-    if (!groups.length) { list.innerHTML = emptyState({ icon: 'group', title: needle ? 'No match' : `No ${sex === 'male' ? 'boys' : 'girls'} Lifegroup available`, text: needle ? 'Try another group, leader or area name.' : `No active ${sex === 'male' ? 'boys' : 'girls'} group with open slots. Create one under Lifegroups.` }).value; return; }
+    const groups = needle ? all.filter((g) => [g.name, g.leader_name, g.network, g.network_name].some((v) => v && String(v).toLowerCase().includes(needle))) : all;
+    if (!groups.length) { list.innerHTML = emptyState({ icon: 'group', title: needle ? 'No match' : `No ${sex === 'male' ? 'boys' : 'girls'} Lifegroup available`, text: needle ? 'Try another group or leader name.' : `No active ${sex === 'male' ? 'boys' : 'girls'} group with open slots. Create one under Lifegroups.` }).value; return; }
     list.innerHTML = `<div class="table-wrap"><table class="table table--stack">
       <thead><tr><th>Group</th><th>Leader</th><th>Network</th><th>Schedule</th><th>Slots</th><th></th></tr></thead>
       <tbody>${groups.map((g) => `<tr>
-        <td data-label=""><b>${esc(g.name)}</b> ${genderBadge(g.gender).value}${g.area ? `<div class="small muted">${esc(g.area)}</div>` : ''}</td>
+        <td data-label=""><b>${esc(g.name)}</b> ${genderBadge(g.gender).value}</td>
         <td data-label="Leader">${esc(g.leader_name || '—')}</td>
         <td data-label="Network">${esc(g.network || g.network_name || '—')}</td>
         <td data-label="Schedule">${esc(fmtSchedule(g) || '—')}</td>
@@ -212,7 +211,7 @@ export async function findLifegroup(person, onAssigned) {
 // ---------------------------------------------------------------------------
 export async function renderLifegroups({ main, query }) {
   const tab = ['needs', 'networks', 'progress'].includes(query.tab) ? query.tab : 'groups';
-  const filters = { q: query.q || '', area: query.area || '', status: query.status || 'active', gender: query.gender || '' };
+  const filters = { q: query.q || '', status: query.status || 'active', gender: query.gender || '' };
   let overview = null;
   try { overview = await api.get('/api/lifegroups/overview'); } catch (e) { /* non-fatal */ }
 
@@ -222,11 +221,12 @@ export async function renderLifegroups({ main, query }) {
       <div class="page-actions">${can('lifegroups:manage') && tab !== 'networks' ? html`<button class="btn btn--primary" id="newGroup">${icon('plus')} New Lifegroup</button>` : ''}</div>
     </div>
     ${overview ? html`<div class="kpi-row mb-2" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr))">
-      <div class="kpi"><b>${overview.active_groups}</b><span>Active groups</span>${overview.boys_groups != null ? html`<div class="small muted" style="text-transform:none;letter-spacing:0;font-weight:500">${overview.boys_groups} boys · ${overview.girls_groups} girls</div>` : ''}</div>
-      <div class="kpi"><b>${overview.total_leaders}</b><span>Leaders</span></div>
-      <div class="kpi"><b>${overview.with_group}</b><span>With Lifegroup</span></div>
-      <div class="kpi ${overview.without_group ? 'kpi--amber' : ''}"><b>${overview.without_group}</b><span>Without Lifegroup</span></div>
-      <div class="kpi"><b>${overview.groups_with_slots}</b><span>Groups with slots</span></div>
+      <a class="kpi kpi--link" href="#/lifegroups"><b>${overview.active_groups}</b><span>Active groups</span>${overview.boys_groups != null ? html`<div class="small muted" style="text-transform:none;letter-spacing:0;font-weight:500">${overview.boys_groups} boys · ${overview.girls_groups} girls</div>` : ''}</a>
+      <a class="kpi kpi--link" href="#/lifegroups?tab=networks"><b>${overview.total_leaders}</b><span>Leaders</span><div class="small muted" style="text-transform:none;letter-spacing:0;font-weight:500">${overview.networks} network${overview.networks === 1 ? '' : 's'}</div></a>
+      <a class="kpi kpi--link kpi--teal" href="#/reports?view=lifegroups"><b>${overview.closed_cell}</b><span>Closed cell</span><div class="small muted" style="text-transform:none;letter-spacing:0;font-weight:500">matagal na · consistent</div></a>
+      <a class="kpi kpi--link" href="#/lifegroups?tab=progress"><b>${overview.open_cell}</b><span>Open cell</span><div class="small muted" style="text-transform:none;letter-spacing:0;font-weight:500">mga bago</div></a>
+      <a class="kpi kpi--link" href="#/people"><b>${overview.with_group}</b><span>With Lifegroup</span></a>
+      <a class="kpi kpi--link ${overview.without_group ? 'kpi--amber' : ''}" href="#/lifegroups?tab=needs"><b>${overview.without_group}</b><span>Without Lifegroup</span></a>
     </div>` : ''}
     <div class="filter-tabs mb-2" id="tabs">
       <button data-t="groups" class="${tab === 'groups' ? 'active' : ''}">Groups</button>
@@ -249,46 +249,46 @@ export async function renderLifegroups({ main, query }) {
 }
 
 async function drawGroups(body, filters) {
-  let opts = { areas: [] };
-  try { opts = await api.lifegroupOptions(); } catch (e) { /* optional */ }
   body.innerHTML = html`
     <div class="toolbar">
-      <div class="gsearch grow" style="max-width:none">${icon('search', 17)}<input type="search" id="gq" placeholder="Search group, leader, area or network" value="${filters.q}" autocomplete="off" /></div>
-      <select id="ggender" style="width:auto;min-width:120px" aria-label="Boys or girls"><option value="">Boys & girls</option><option value="boys" ${filters.gender === 'boys' ? 'selected' : ''}>Boys groups</option><option value="girls" ${filters.gender === 'girls' ? 'selected' : ''}>Girls groups</option></select>
-      <select id="garea" style="width:auto;min-width:140px" aria-label="Area"><option value="">All areas</option>${opts.areas.map((a) => html`<option value="${a}" ${filters.area === a ? 'selected' : ''}>${a}</option>`)}</select>
+      <div class="gsearch grow" style="max-width:none">${icon('search', 17)}<input type="search" id="gq" placeholder="Search group, leader or network" value="${filters.q}" autocomplete="off" /></div>
+      <div class="filter-tabs" id="ggender" style="margin:0"><button data-g="" class="${!filters.gender ? 'active' : ''}">Boys &amp; girls</button><button data-g="boys" class="${filters.gender === 'boys' ? 'active' : ''}">Boys</button><button data-g="girls" class="${filters.gender === 'girls' ? 'active' : ''}">Girls</button></div>
       <select id="gstatus" style="width:auto;min-width:120px" aria-label="Status"><option value="active">Active</option><option value="inactive" ${filters.status === 'inactive' ? 'selected' : ''}>Inactive</option><option value="all" ${filters.status === 'all' ? 'selected' : ''}>All</option></select>
     </div>
-    <div class="card"><div id="glist" class="card__body--flush"><div class="loading">Loading…</div></div></div>`;
+    <div id="glist"><div class="card"><div class="loading">Loading…</div></div></div>`;
   const list = body.querySelector('#glist');
   let reqId = 0;
   async function load() {
     const id = ++reqId;
-    history.replaceState(null, '', '#/lifegroups' + api.qs({ q: filters.q, area: filters.area, gender: filters.gender, status: filters.status === 'active' ? '' : filters.status }));
+    history.replaceState(null, '', '#/lifegroups' + api.qs({ q: filters.q, gender: filters.gender, status: filters.status === 'active' ? '' : filters.status }));
     let groups;
     try { groups = await api.lifegroups(filters); } catch (e) { list.innerHTML = html`<div class="alert alert--error" style="margin:16px">${e.message}</div>`; return; }
     if (id !== reqId) return;
     if (!groups.length) {
-      list.innerHTML = emptyState({ icon: 'group', title: filters.q || filters.area ? 'No group matches' : 'No Lifegroups yet', text: filters.q || filters.area ? 'Try a different search.' : 'Create the first Lifegroup so people can be connected after Sunday.', action: can('lifegroups:manage') && !filters.q ? '<button class="btn btn--primary" id="newGroup2">New Lifegroup</button>' : '' });
+      list.innerHTML = html`<div class="card">${emptyState({ icon: 'group', title: filters.q ? 'No group matches' : 'No Lifegroups yet', text: filters.q ? 'Try a different search.' : 'Create the first Lifegroup so people can be connected after Sunday.', action: can('lifegroups:manage') && !filters.q ? '<button class="btn btn--primary" id="newGroup2">New Lifegroup</button>' : '' })}</div>`;
       list.querySelector('#newGroup2')?.addEventListener('click', () => groupForm(null, (g) => { location.hash = `#/lifegroups/${g.id}`; }));
       return;
     }
-    list.innerHTML = html`<div class="table-wrap"><table class="table table--stack">
-      <thead><tr><th>Group</th><th>Leader</th><th>Area</th><th>Schedule</th><th class="num">Members</th><th>Solid</th><th>Last held</th></tr></thead>
-      <tbody>${groups.map((g) => html`<tr class="clickable" data-id="${g.id}">
-        <td data-label=""><b>${g.name}</b> ${genderBadge(g.gender)}${g.network ? html`<div class="small muted">${g.network}${g.network_leader_name ? html` · ${g.network_leader_name}` : ''}</div>` : ''}${g.is_active ? '' : raw(' <span class="badge badge--nodot">Inactive</span>')}${g.is_demo ? raw(' <span class="badge badge--demo badge--nodot">Demo</span>') : ''}</td>
-        <td data-label="Leader">${g.leader_name || raw('<span class="muted">—</span>')}</td>
-        <td data-label="Area">${g.area || raw('<span class="muted">—</span>')}</td>
-        <td data-label="Schedule">${fmtSchedule(g) || raw('<span class="muted">—</span>')}</td>
+    const table = (rows) => html`<div class="table-wrap"><table class="table table--stack">
+      <thead><tr><th>Group</th><th>Leader</th><th>Network</th><th>Schedule</th><th class="num">Members</th><th class="num">Closed cell</th><th class="num">Open cell</th><th>Last held</th></tr></thead>
+      <tbody>${rows.map((g) => { const closed = g.solid_count || 0, open = g.member_count - closed, t = g.solid_target || 6; return html`<tr class="clickable" data-id="${g.id}">
+        <td data-label="" class="nowrap"><b>${g.name}</b>${g.is_active ? '' : raw(' <span class="badge badge--nodot">Inactive</span>')}${g.is_demo ? raw(' <span class="badge badge--demo badge--nodot">Demo</span>') : ''}</td>
+        <td data-label="Leader" class="nowrap">${g.leader_name || raw('<span class="muted">—</span>')}</td>
+        <td data-label="Network" class="small nowrap">${g.network ? html`${g.network}${g.network_leader_name ? html`<div class="muted">${g.network_leader_name}</div>` : ''}` : raw('<span class="muted">—</span>')}</td>
+        <td data-label="Schedule" class="nowrap">${fmtSchedule(g) || raw('<span class="muted">—</span>')}</td>
         <td data-label="Members" class="num">${g.member_count}${g.capacity != null ? html`<span class="muted"> / ${g.capacity}</span>` : ''}</td>
-        <td data-label="Solid" class="nowrap">${solidBadge(g.solid_count || 0, g.solid_target || 6, (g.solid_count || 0) >= (g.solid_target || 6))}</td>
+        <td data-label="Closed cell" class="num nowrap">${closed >= t ? raw(`<span class="badge badge--present badge--nodot" title="Solid Lifegroup">${closed}</span>`) : html`${closed}<span class="muted small">/${t}</span>`}</td>
+        <td data-label="Open cell" class="num">${open}</td>
         <td data-label="Last held" class="nowrap small">${g.last_held ? fmtDate(g.last_held, { short: true }) : raw('<span class="muted">—</span>')}</td>
-      </tr>`)}</tbody></table></div>
-      <div class="card__footer small muted">${groups.length} group${groups.length === 1 ? '' : 's'}</div>`;
+      </tr>`; })}</tbody></table></div>`;
+    const section = (key, rows) => rows.length ? html`<div class="card mb-2">
+      <div class="card__header"><h2>${key === 'boys' ? 'Boys Lifegroups' : key === 'girls' ? 'Girls Lifegroups' : 'Boys or girls not set'} ${genderBadge(key)}</h2><span class="hint">${rows.length} group${rows.length === 1 ? '' : 's'} · ${rows.reduce((a, g) => a + g.member_count, 0)} members · ${rows.reduce((a, g) => a + (g.solid_count || 0), 0)} closed cell</span></div>
+      <div class="card__body card__body--flush">${table(rows)}</div></div>` : '';
+    list.innerHTML = html`${section('boys', groups.filter((g) => g.gender === 'boys'))}${section('girls', groups.filter((g) => g.gender === 'girls'))}${section('na', groups.filter((g) => !g.gender))}`;
     list.querySelectorAll('tr.clickable').forEach((tr) => { tr.onclick = () => { location.hash = `#/lifegroups/${tr.dataset.id}`; }; });
   }
   body.querySelector('#gq').addEventListener('input', debounce((e) => { filters.q = e.target.value.trim(); load(); }, 250));
-  body.querySelector('#garea').onchange = (e) => { filters.area = e.target.value; load(); };
-  body.querySelector('#ggender').onchange = (e) => { filters.gender = e.target.value; load(); };
+  body.querySelector('#ggender').onclick = (e) => { const b = e.target.closest('button'); if (!b) return; filters.gender = b.dataset.g; body.querySelectorAll('#ggender button').forEach((x) => x.classList.toggle('active', x === b)); load(); };
   body.querySelector('#gstatus').onchange = (e) => { filters.status = e.target.value; load(); };
   load();
 }
@@ -345,11 +345,9 @@ export async function renderLifegroup({ main }, id) {
       <div class="card stat"><span class="stat__label">Members</span><span class="stat__value">${g.member_count}${g.capacity != null ? html`<small> / ${g.capacity}</small>` : ''}</span></div>
       <div class="card stat"><span class="stat__label">Slots</span><span class="stat__value" style="font-size:1.15rem">${slotsText(g)}</span></div>
       <div class="card stat"><span class="stat__label">Schedule</span><span class="stat__value" style="font-size:1.15rem">${fmtSchedule(g) || '—'}</span></div>
-      <div class="card stat"><span class="stat__label">Area</span><span class="stat__value" style="font-size:1.15rem">${g.area || '—'}</span></div>
-      <div class="card stat"><span class="stat__label">Boys · Girls</span><span class="stat__value" style="font-size:1.15rem">${g.members.filter((m) => m.sex === 'male').length} · ${g.members.filter((m) => m.sex === 'female').length}</span></div>
     </div>
 
-    <div class="grid grid--detail">
+    <div class="stack">
       <div class="card">
         <div class="card__header"><h2>Details</h2></div>
         <div class="card__body"><dl class="dl">
@@ -364,18 +362,11 @@ export async function renderLifegroup({ main }, id) {
         </dl></div>
       </div>
       <div class="card">
-        <div class="card__header"><h2>Members</h2><span class="hint">${g.members.length} current</span></div>
-        <div class="card__body card__body--flush">
-          ${g.members.length ? html`<div class="table-wrap"><table class="table table--stack">
-            <thead><tr><th>Name</th><th>Boy / Girl</th><th>Role</th><th>Since</th><th>Last attendance</th>${manage ? raw('<th></th>') : ''}</tr></thead>
-            <tbody>${g.members.map((m) => html`<tr>
-              <td data-label=""><div class="person-cell">${raw(avatar(m, 'sm'))}<div class="person-cell__text"><a class="name" href="#/people/${m.id}">${fullName(m)}</a><div class="code">${m.person_code}</div></div></div></td>
-              <td data-label="Boy / Girl">${sexBadge(m.sex)}</td>
-              <td data-label="Role">${m.role === 'member' ? raw(statusBadge(m.status)) : html`<span class="badge badge--leader">${m.role === 'leader' ? 'Leader' : 'Assistant'}</span>`}</td>
-              <td data-label="Since" class="nowrap">${fmtDate(m.joined_at, { short: true })}</td>
-              <td data-label="Last attendance" class="nowrap">${m.last_attended ? fmtDate(m.last_attended, { short: true }) : raw('<span class="muted">—</span>')}</td>
-              ${manage ? html`<td data-label="" class="actions"><button class="btn btn--ghost btn--sm" data-leave="${m.id}" data-name="${fullName(m)}">Remove</button></td>` : ''}
-            </tr>`)}</tbody></table></div>` : html`<div class="empty" style="padding:28px"><p>No members yet.${manage ? raw(' Use <b>Add member</b> or assign from a person’s profile.') : ''}</p></div>`}
+        <div class="card__header"><h2>Members</h2><span class="hint">${g.members.filter((m) => m.tier !== 'solid').length} open cell · ${g.members.filter((m) => m.tier === 'solid').length} closed cell</span></div>
+        <div class="card__body card__body--flush" id="membersCard">
+          ${g.members.length ? html`${memberSections(g.members.map((m) => ({ ...m, name: fullName(m), sub: html`${raw(statusBadge(m.status))} <span class="muted">since ${fmtDate(m.joined_at, { short: true })}</span>` })), { manage,
+              actions: (m) => html`<button class="btn btn--ghost btn--sm" data-leave="${m.id}" data-name="${fullName(m)}" title="Remove from this Lifegroup">Remove</button> ` })}
+            <div class="card__footer small muted">${dotsKey()} · The leader moves members between open and closed cell on their QR page; staff can do it here.</div>` : html`<div class="empty" style="padding:28px"><p>No members yet.${manage ? raw(' Use <b>Add member</b> or assign from a person’s profile.') : ''}</p></div>`}
         </div>
       </div>
     </div>
@@ -384,7 +375,20 @@ export async function renderLifegroup({ main }, id) {
       <div class="card__body"><ul class="small" style="margin:0 0 0 18px;columns:2;column-gap:24px">${g.former.map((f) => html`<li><a href="#/people/${f.id}">${fullName(f)}</a> <span class="muted">· ${fmtDate(f.joined_at, { short: true })} → ${fmtDate(f.left_at, { short: true })}</span></li>`)}</ul></div></div>` : ''}
     ${can('people:delete') && !g.members.length && !g.former.length ? html`<div class="row mt-3" style="padding:0 4px"><button class="btn btn--ghost small" id="delGroup" style="color:var(--muted)">Delete this empty group</button></div>` : ''}`;
 
-  renderProgressCard(main.querySelector('#progressCard'), g.id, { onChange: () => {} });
+  renderProgressCard(main.querySelector('#progressCard'), g.id, { onChange: () => {}, onLoaded: (p) => {
+    // fill in the last-4-weeks cells now that progress data is here
+    const by = new Map(p.members.map((m) => [m.id, m.last4]));
+    main.querySelectorAll('#membersCard [data-tier]').forEach((b) => {
+      const row = b.closest('tr'); const cell = row && row.querySelector('[data-label="Last 4 weeks"]'); const l4 = by.get(Number(b.dataset.tier));
+      if (cell && l4) cell.innerHTML = memberDots(l4).value + (l4.consistency_pct != null ? ` <span class="small muted">${l4.consistency_pct}%</span>` : '');
+    });
+  } });
+  main.querySelectorAll('#membersCard [data-tier]').forEach((b) => {
+    b.onclick = () => withLoading(b, async () => {
+      try { await api.setTier(g.id, Number(b.dataset.tier), b.dataset.to); toast(b.dataset.to === 'solid' ? 'Moved to the closed cell.' : 'Moved to the open cell.'); renderLifegroup({ main }, id); }
+      catch (e) { toast(e.message, 'error'); }
+    });
+  });
   main.querySelector('#editGroup')?.addEventListener('click', () => groupForm(g, () => renderLifegroup({ main }, id)));
   main.querySelector('#delGroup')?.addEventListener('click', async () => {
     const ok = await confirmDialog({ title: `Delete ${g.name}?`, message: 'This group has no membership history, so it can be removed.', confirmText: 'Delete', danger: true });
@@ -549,8 +553,10 @@ async function drawNetworks(body) {
 }
 
 export async function renderNetwork({ main }, id) {
-  const n = await api.network(id);
+  const [n, cal] = await Promise.all([api.network(id), api.networkCalendar(id, 8, { members: true }).catch(() => null)]);
   const manage = can('lifegroups:manage');
+  const netTarget = cal ? cal.target : 6;
+  const last4Of = (gid, pid) => (cal && cal.members_last4 && cal.members_last4[gid] ? cal.members_last4[gid][pid] || null : null);
   const members = n.groups.reduce((t, g) => t + g.member_count, 0);
   const boys = n.groups.reduce((t, g) => t + g.boys, 0), girls = n.groups.reduce((t, g) => t + g.girls, 0);
   const leaders = new Set(n.groups.filter((g) => g.is_active && (g.leader_person_id || g.leader_name)).map((g) => g.leader_person_id ? 'p' + g.leader_person_id : 'n' + g.leader_name)).size;
@@ -599,49 +605,25 @@ export async function renderNetwork({ main }, id) {
                 <div class="min-w-0">
                   <span class="tree__tag">Lifegroup leader · ${g.gender === 'boys' ? 'boys group' : g.gender === 'girls' ? 'girls group' : 'boys/girls not set'}</span>
                   <div class="tree__who"><b>${g.leader_name || raw('<span class="muted">No leader</span>')}</b> <span class="muted">· ${g.name}</span> ${genderBadge(g.gender)}${g.is_active ? '' : raw(' <span class="badge badge--nodot">Inactive</span>')}</div>
-                  <div class="small muted">${g.member_count} member${g.member_count === 1 ? '' : 's'}${g.area ? html` · ${g.area}` : ''}${fmtSchedule(g) ? html` · ${fmtSchedule(g)}` : ''}</div>
+                  <div class="small muted">${g.member_count} member${g.member_count === 1 ? '' : 's'}${fmtSchedule(g) ? html` · ${fmtSchedule(g)}` : ''}</div>
                 </div>
-                <div class="tree__ratio">${ratioBar(g.boys, g.girls, g.member_count, { compact: true })}<span class="small muted">${g.boys} boys · ${g.girls} girls</span></div>
+                <div class="small muted nowrap">${solidBadge(g.members.filter((m) => m.tier === 'solid').length, netTarget, g.members.filter((m) => m.tier === 'solid').length >= netTarget)}</div>
               </div>
               <span class="tree__toggle small">${icon('chevR', 14)} <span class="t-open">Show members</span><span class="t-close">Hide members</span></span>
             </summary>
             <div class="tree__members">
               <div class="row small mb-1" style="gap:10px"><a href="#/lifegroups/${g.id}">Open ${g.name} ${icon('chevR', 12)}</a>${g.leader_person_id ? html`<a href="#/people/${g.leader_person_id}">Leader profile</a>` : ''}</div>
-              ${g.members.length ? html`<div class="table-wrap"><table class="table table--stack">
-                <thead><tr><th>Member</th><th>Boy / Girl</th><th>Status</th><th>Role</th><th>Since</th></tr></thead>
-                <tbody>${g.members.map((m) => html`<tr>
-                  <td data-label=""><div class="person-cell">${raw(avatar(m, 'sm'))}<div class="person-cell__text"><a class="name" href="#/people/${m.id}">${fullName(m)}</a><div class="code">${m.person_code}</div></div></div></td>
-                  <td data-label="Boy / Girl">${sexBadge(m.sex)}</td>
-                  <td data-label="Status">${raw(statusBadge(m.status))}</td>
-                  <td data-label="Role">${m.role === 'member' ? raw('<span class="muted">Member</span>') : html`<span class="badge badge--leader">${m.role === 'leader' ? 'Leader' : 'Assistant'}</span>`}</td>
-                  <td data-label="Since" class="nowrap">${fmtDate(m.joined_at, { short: true })}</td>
-                </tr>`)}</tbody></table></div>` : raw('<div class="small muted" style="padding:6px 0">No members yet.</div>')}
+              ${g.members.length ? memberSections(g.members.map((m) => ({ ...m, name: fullName(m), last4: last4Of(g.id, m.id), sub: html`${raw(statusBadge(m.status))} <span class="muted">since ${fmtDate(m.joined_at, { short: true })}</span>` })), { manage: false }) : raw('<div class="small muted" style="padding:6px 0">No members yet.</div>')}
             </div>
           </details>`)}</div>` : html`<div class="tree__children"><div class="tree__node small muted">No Lifegroups in this Network yet.${manage ? ' Edit a Lifegroup and choose this Network.' : ''}</div></div>`}
         </div>
       </div>
+      <div class="card__footer small muted">${dotsKey()} · Solid = closed cell · New = open cell · Statistics and CSV: <a href="#/reports?view=lifegroups">Reports → Lifegroups</a></div>
     </div>
 
     <div class="card mb-2" id="netCalendar"></div>
-    <div class="card">
-      <div class="card__header"><h2>Boys &amp; girls</h2><span class="hint">current members in this Network's groups</span></div>
-      <div class="card__body">
-        ${ratioBar(boys, girls, members)}
-        ${n.groups.length ? html`<div class="table-wrap mt-2"><table class="table table--stack">
-          <thead><tr><th>Lifegroup</th><th>Leader</th><th class="num">Members</th><th class="num">Boys</th><th class="num">Girls</th><th>Ratio</th></tr></thead>
-          <tbody>${n.groups.map((g) => html`<tr>
-            <td data-label=""><a href="#/lifegroups/${g.id}"><b>${g.name}</b></a> ${genderBadge(g.gender)}</td>
-            <td data-label="Leader">${g.leader_name || raw('<span class="muted">—</span>')}</td>
-            <td data-label="Members" class="num">${g.member_count}</td><td data-label="Boys" class="num">${g.boys}</td><td data-label="Girls" class="num">${g.girls}</td>
-            <td data-label="Ratio">${ratioBar(g.boys, g.girls, g.member_count, { compact: true })}</td>
-          </tr>`)}</tbody>
-          <tfoot><tr><td data-label="">Total</td><td data-label=""></td><td data-label="Members" class="num">${members}</td><td data-label="Boys" class="num">${boys}</td><td data-label="Girls" class="num">${girls}</td><td data-label="Ratio">${members ? html`${Math.round((boys / members) * 100)}% · ${Math.round((girls / members) * 100)}%` : '—'}</td></tr></tfoot>
-        </table></div>` : ''}
-        <div class="small muted mt-1">Full report with every Network and CSV export: <a href="#/reports?view=lifegroups">Reports → Lifegroups</a>.</div>
-      </div>
-    </div>
     ${can('people:delete') && !n.groups.length && !n.children.length ? html`<div class="row mt-3" style="padding:0 4px"><button class="btn btn--ghost small" id="delNet" style="color:var(--muted)">Delete this empty network</button></div>` : ''}`;
-  renderNetworkCalendar(main.querySelector('#netCalendar'), n.id);
+  renderNetworkCalendar(main.querySelector('#netCalendar'), n.id, cal);
   main.querySelector('#editNet')?.addEventListener('click', () => networkForm(n, () => renderNetwork({ main }, id)));
   main.querySelector('#delNet')?.addEventListener('click', async () => {
     const ok = await confirmDialog({ title: `Delete ${n.name}?`, message: 'This Network has no Lifegroups or sub-networks, so it can be removed.', confirmText: 'Delete', danger: true });

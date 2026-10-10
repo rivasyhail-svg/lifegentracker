@@ -110,18 +110,17 @@ export async function renderRegistrations({ main, query }) {
     }
     list.innerHTML = html`
       <div class="table-wrap"><table class="table table--stack">
-        <thead><tr><th style="width:28px"><input type="checkbox" id="selAll" aria-label="Select all pending on this page" /></th><th>Name</th><th>Email</th><th>Age · School</th><th>Leader</th><th>Ministry</th><th>Submitted</th><th>Source</th><th>Status</th><th></th></tr></thead>
+        <thead><tr>${filters.status === 'pending' ? raw('<th style="width:28px"><input type="checkbox" id="selAll" aria-label="Select all pending on this page" /></th>') : ''}<th>Name</th><th>Age · School</th><th>Leader</th><th>Ministry</th><th>Submitted</th><th>Status</th>${filters.status === 'pending' ? '' : raw('<th>Lifegroup</th>')}<th></th></tr></thead>
         <tbody>
           ${data.items.map((r) => html`<tr class="clickable" data-id="${r.id}">
-            <td data-label="">${r.status === 'pending' ? html`<input type="checkbox" data-sel="${r.id}" aria-label="Select ${r.full_name}" ${selected.has(r.id) ? 'checked' : ''} />` : ''}</td>
-            <td data-label="Name"><div class="name">${r.full_name}</div><div class="code">${r.ref_code || ''}${r.possible_duplicate ? raw(' <span class="badge badge--nodot reg-flag" title="Same name as someone already registered">Possible duplicate</span>') : ''} ${riskBadges(r)}</div></td>
-            <td data-label="Email" class="small">${r.email}</td>
-            <td data-label="Age · School" class="small">${r.age} · ${r.school}</td>
-            <td data-label="Leader" class="small">${r.leader_name}<br><span class="muted">${r.network_leader_name}</span></td>
-            <td data-label="Ministry" class="small">${r.ministry}</td>
-            <td data-label="Submitted" class="small">${fmtDateTime(r.submitted_at)}</td>
-            <td data-label="Source"><span class="badge badge--nodot">QR Registration</span></td>
-            <td data-label="Status">${statusBadge(r.status)}${r.status === 'approved' && r.person_code ? html`<div class="code"><a href="#/people/${r.person_id}">${r.person_code}</a></div>` : ''}</td>
+            ${filters.status === 'pending' ? html`<td data-label="">${r.status === 'pending' ? html`<input type="checkbox" data-sel="${r.id}" aria-label="Select ${r.full_name}" ${selected.has(r.id) ? 'checked' : ''} />` : ''}</td>` : ''}
+            <td data-label="Name" class="nowrap"><div class="name">${r.full_name}</div><div class="small muted">${r.email}</div><div class="code">${r.ref_code || ''}${r.possible_duplicate ? raw(' <span class="badge badge--nodot reg-flag" title="Same name as someone already registered">Possible duplicate</span>') : ''} ${riskBadges(r)}</div></td>
+            <td data-label="Age · School" class="small nowrap">${r.age} · ${r.school}</td>
+            <td data-label="Leader" class="small nowrap">${r.leader_name}<br><span class="muted">${r.network_leader_name}</span></td>
+            <td data-label="Ministry" class="small nowrap">${r.ministry}</td>
+            <td data-label="Submitted" class="small nowrap">${fmtDateTime(r.submitted_at)}</td>
+            <td data-label="Status" class="nowrap">${statusBadge(r.status)}${r.status === 'approved' && r.person_code ? html`<div class="small"><a href="#/people/${r.person_id}">${r.person_code}</a>${r.reviewed_by_name ? html` <span class="muted">· ${r.reviewed_by_name}</span>` : ''}</div>` : ''}${r.status === 'rejected' && r.reviewed_by_name ? html`<div class="small muted">by ${r.reviewed_by_name}</div>` : ''}</td>
+            ${filters.status === 'pending' ? '' : html`<td data-label="Lifegroup" class="small nowrap">${r.status === 'approved' && r.lifegroup_name ? html`<a href="#/lifegroups/${r.lifegroup_id}">${r.lifegroup_name}</a>` : r.status === 'approved' && r.person_id ? html`<a class="badge badge--nodot" href="#/people/${r.person_id}" title="No Lifegroup leader matched the name typed on the form — assign from the profile">Needs Lifegroup</a>` : raw('<span class="muted">—</span>')}</td>`}
             <td data-label="" style="white-space:nowrap;text-align:right">
               <button class="btn btn--sm" data-view="${r.id}">View</button>
               ${r.status === 'pending' ? html` <button class="btn btn--sm btn--primary" data-approve="${r.id}">Approve</button>` : ''}
@@ -210,7 +209,8 @@ async function openRegistration(id, reload, opts = {}) {
               ${!p.email || p.email.toLowerCase() === r.email.toLowerCase() ? html`<button class="btn btn--sm" data-link="${p.id}">${icon('link', 14)} Link to this person</button>` : html`<span class="small muted">different email</span>`}</div>`)}
             <span class="small">“Link” fills the blanks of the existing record (email, school, age, ministry) instead of creating a duplicate. “Approve” creates a new person.</span>
           </div>` : ''}
-        ${pending && rv.matching_groups && rv.matching_groups.length ? html`<p class="small muted">Leader “${r.leader_name}” matches Lifegroup ${rv.matching_groups.map((g) => html`<a href="#/lifegroups/${g.id}">${g.name}</a>`)} — you can assign them after approving.</p>` : ''}
+        ${r.status === 'approved' ? html`<p class="small">${icon('check', 14)} Approved${r.reviewed_by_name ? ` by ${r.reviewed_by_name}` : ''} → <a href="#/people/${r.person_id}">${r.person_code || 'person record'}</a>${r.lifegroup_name ? html` · Lifegroup <a href="#/lifegroups/${r.lifegroup_id}">${r.lifegroup_name}</a>` : html` · <a href="#/people/${r.person_id}">Needs Lifegroup — assign from the profile</a>`}</p>` : ''}
+        ${pending && rv.matching_groups && rv.matching_groups.length ? html`<p class="small muted">Leader “${r.leader_name}” matches Lifegroup ${rv.matching_groups.map((g) => html`<a href="#/lifegroups/${g.id}">${g.name}</a>`)} — on approve they are placed there automatically (open cell).</p>` : ''}
         ${pending ? html`<div class="field"><label for="approveStatus">Status after approval</label>
           <select id="approveStatus" style="max-width:260px"><option value="first_timer">First Timer (default)</option><option value="returning">Returning</option><option value="regular">Regular</option></select>
           <span class="help">Contact number is not asked on the QR form — staff can add it on the person's profile later.</span></div>` : ''}
@@ -229,13 +229,13 @@ async function openRegistration(id, reload, opts = {}) {
   modal.querySelector('[data-approve]')?.addEventListener('click', (e) => withLoading(e.currentTarget, async () => {
     try {
       const out = await api.approveRegistration(id, { mode: 'create', status: modal.querySelector('#approveStatus')?.value });
-      await done(`${r.full_name} added to People (${out.person_code || 'new record'}).`);
+      await done(out.placed ? `${r.full_name} added to People (${out.person_code || 'new'}) and placed under ${out.placed.name} — open cell.` : `${r.full_name} added to People (${out.person_code || 'new record'}). No Lifegroup leader named “${r.leader_name}” was found — assign a Lifegroup from the profile.`);
     } catch (err) { toast(err.message, 'error'); }
   }));
   modal.querySelectorAll('[data-link]').forEach((b) => b.addEventListener('click', (e) => withLoading(e.currentTarget, async () => {
     const ok = await confirmDialog({ title: 'Link to existing person?', message: 'The registration will be marked approved and the existing record keeps its ID, status and attendance. Only empty fields are filled in.', confirmText: 'Link' });
     if (!ok) return;
-    try { await api.approveRegistration(id, { mode: 'link', person_id: Number(b.dataset.link) }); await done('Linked to the existing person.'); }
+    try { const out = await api.approveRegistration(id, { mode: 'link', person_id: Number(b.dataset.link) }); await done(out.placed ? `Linked to the existing person and placed under ${out.placed.name} — open cell.` : 'Linked to the existing person.'); }
     catch (err) { toast(err.message, 'error'); }
   })));
   modal.querySelector('[data-reject]')?.addEventListener('click', () => rejectDialog(r, reload));

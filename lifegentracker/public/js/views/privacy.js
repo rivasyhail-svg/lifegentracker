@@ -21,7 +21,7 @@ export function privacyContent(settings = state.settings || {}) {
         <h3>What we collect — only what is needed</h3>
         <ul>
           <li><b>Required:</b> name, contact number, and attendance status (first timer, returning, regular…).</li>
-          <li><b>Optional, only if you give it:</b> birthday, boy/girl, email, address, school or course, occupation, a photo, Lifegroup preferences (area, day, time) and short notes written by staff.</li>
+          <li><b>Optional, only if you give it:</b> birthday, boy/girl, email, address, school or course, occupation, a photo, Lifegroup membership and short notes written by staff.</li>
           <li><b>Created by the system:</b> which Sundays you were present, your Lifegroup membership and its history, and when your record was changed and by whom.</li>
         </ul>
         <p>We do not collect government IDs, financial details, or anything not needed for attendance and Lifegroup follow-up.</p>

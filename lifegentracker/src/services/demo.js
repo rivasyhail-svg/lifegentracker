@@ -128,7 +128,7 @@ function load(db, userId) {
     db.prepare("UPDATE lifegroup_memberships SET tier = 'solid' WHERE left_at IS NULL AND lifegroup_id = ?").run(JOSHUA); // one solid Lifegroup in the demo
     const insertMeet = db.prepare(`INSERT OR IGNORE INTO lifegroup_meetings (lifegroup_id, meeting_date, held, no_meeting_reason, topic, notes, present_count, submitted_via, submitted_by_name)
       VALUES (?, ?, ?, ?, ?, 'DEMO DATA', ?, 'leader_link', 'Demo leader')`);
-    const insertMA = db.prepare('INSERT OR IGNORE INTO lifegroup_meeting_attendance (meeting_id, person_id) VALUES (?, ?)');
+    const insertMA = db.prepare('INSERT OR IGNORE INTO lifegroup_meeting_attendance (meeting_id, person_id, present, devotion) VALUES (?, ?, 1, ?)');
     const topics = ['Prayer', 'Identity in Christ', 'Serving', 'Faith', 'Community', 'Generosity'];
     const dayOffset = { sat: 6, fri: 5 };
     groups.forEach((gid, gi) => {
@@ -141,7 +141,7 @@ function load(db, userId) {
         if ((w + gi) % 5 === 0) { insertMeet.run(gid, date, 0, 'Demo: exams week', null, 0); continue; }
         const present = mem.filter((_, i) => (i + w) % 4 !== 0);
         const id = insertMeet.run(gid, date, 1, null, topics[(w + gi) % topics.length], present.length).lastInsertRowid;
-        for (const pid of present) insertMA.run(id, pid);
+        for (const pid of present) insertMA.run(id, pid, (pid + w) % 3 === 0 ? 0 : 1);
       }
     });
   })();
@@ -151,6 +151,7 @@ function load(db, userId) {
 
 function remove(db) {
   db.transaction(() => {
+    db.prepare("DELETE FROM registrations WHERE user_agent = 'DEMO DATA'").run();
     db.prepare('DELETE FROM lifegroup_meeting_attendance WHERE meeting_id IN (SELECT id FROM lifegroup_meetings WHERE lifegroup_id IN (SELECT id FROM lifegroups WHERE is_demo = 1))').run();
     db.prepare('DELETE FROM lifegroup_meetings WHERE lifegroup_id IN (SELECT id FROM lifegroups WHERE is_demo = 1)').run();
     db.prepare('DELETE FROM lifegroup_memberships WHERE lifegroup_id IN (SELECT id FROM lifegroups WHERE is_demo = 1)').run();

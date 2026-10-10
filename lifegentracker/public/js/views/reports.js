@@ -184,54 +184,84 @@ export async function renderReports({ main, query }) {
 async function renderLifegroupReport({ main }) {
   main.innerHTML = html`
     <div class="page-header">
-      <div><h1>Reports</h1><p class="sub">Lifegroup connection: boys groups and girls groups per Network, members, ratio.</p></div>
+      <div><h1>Reports</h1><p class="sub">Network status, Lifegroup statistics and growth.</p></div>
       <div class="page-actions">
         <div class="filter-tabs" style="margin:0"><button id="toAtt">Attendance</button><button class="active">Lifegroups</button></div>
         <button class="btn" id="printBtn">${icon('print')} Print / PDF</button>
-        <button class="btn" id="csvBtn">${icon('download')} CSV</button>
+        <button class="btn" id="csvNet">${icon('download')} Network CSV</button>
+        <button class="btn" id="csvBtn">${icon('download')} Lifegroups CSV</button>
       </div>
     </div>
     <div id="report"><div class="loading">Building report…</div></div>`;
   main.querySelector('#toAtt').onclick = () => { location.hash = '#/reports'; };
   main.querySelector('#printBtn').onclick = () => window.print();
   main.querySelector('#csvBtn').onclick = () => downloadUrl('/api/reports/export/lifegroups.csv');
+  main.querySelector('#csvNet').onclick = () => downloadUrl('/api/reports/export/network-status.csv');
   const report = main.querySelector('#report');
-  let r;
-  try { r = await api.reportLifegroups(); } catch (e) { report.innerHTML = html`<div class="alert alert--error">${e.message}</div>`; return; }
+  let r, ns;
+  try { [r, ns] = await Promise.all([api.reportLifegroups(), api.networkStats()]); } catch (e) { report.innerHTML = html`<div class="alert alert--error">${e.message}</div>`; return; }
   const t = r.totals;
   if (!r.groups.length) { report.innerHTML = html`<div class="card">${emptyState({ icon: 'group', title: 'No active Lifegroups yet', text: 'Create Lifegroups and connect people to see this report.' })}</div>`; return; }
   const pctTxt = (v) => (v == null ? '—' : `${v}%`);
-  const ratioTxt = (b, g) => (b || g ? `${b} : ${g}` : '—');
   const gr = r.growth || { months: [], summary: { boys: {}, girls: {} } };
   const gs = gr.summary;
   const cls = (n) => (n > 0 ? 'delta--up' : n < 0 ? 'delta--down' : 'delta--flat');
   const sign = (n) => (n > 0 ? '+' : n < 0 ? '−' : '');
-  // "+3 (+25%)" — new members and % growth; "new" when there was nothing to compare with
   const delta = (change, pct) => raw(`<i class="delta ${cls(change)}">${sign(change)}${Math.abs(change || 0)}${pct == null ? (change > 0 ? ' <small>new</small>' : '') : ` <small>(${sign(pct)}${Math.abs(pct)}%)</small>`}</i>`);
   const pctDelta = (pct) => (pct == null ? raw('<span class="muted">—</span>') : raw(`<i class="delta ${cls(pct)}">${sign(pct)}${Math.abs(pct)}%</i>`));
-  const growthRatio = (g) => { const b = Math.max(0, g.boys.change_30d || 0), gi = Math.max(0, g.girls.change_30d || 0); return b || gi ? `${b} : ${gi}` : '—'; };
   const monthLabel = (ym, long = false) => { const [y, m] = ym.split('-').map(Number); return new Date(y, m - 1, 1).toLocaleDateString('en-PH', long ? { month: 'short', year: 'numeric' } : { month: 'short' }); };
+  const bar = (pct, color = 'var(--brand-600)') => (pct == null ? raw('<span class="muted">—</span>') : raw(`<span class="pbar" title="${pct}%"><i style="width:${pct}%;background:${color}"></i></span><span class="small">${pct}%</span>`));
+  const nt = ns.totals;
+  const bySex = (label, x) => html`<tr><td><b>${label}</b></td><td class="num">${x.groups}</td><td class="num">${x.solid_groups}</td><td class="num">${x.total_members}</td><td class="num">${x.solid_members}</td><td class="num">${pctTxt(x.total_members ? Math.round((x.solid_members / x.total_members) * 100) : null)}</td><td class="num">${x.met_this_week}/${x.groups}</td><td class="num">${pctTxt(x.consistency_pct)}</td></tr>`;
+  const solidById = new Map(ns.networks.map((n) => [n.id || 0, n]));
   report.innerHTML = html`
-    <div class="print-header"><h1>${state.settings.church_name} — Lifegroup Report</h1><p>Boys and girls per Network and Lifegroup · generated ${fmtDate(toISODate(new Date()))}</p></div>
+    <div class="print-header"><h1>${state.settings.church_name} — Lifegroup Report</h1><p>Network status and Lifegroup statistics · generated ${fmtDate(toISODate(new Date()))}</p></div>
     <div class="kpi-row mb-2" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr))">
-      <div class="kpi"><b>${fmtNum(t.boys_groups)}</b><span>Boys groups</span></div>
-      <div class="kpi"><b>${fmtNum(t.girls_groups)}</b><span>Girls groups</span></div>
-      <div class="kpi"><b>${fmtNum(t.members)}</b><span>Connected</span></div>
-      <div class="kpi kpi--blue"><b>${fmtNum(t.boys)}</b><span>Boys</span></div>
-      <div class="kpi" style="background:#fdf2f8;border-color:#fbcfe8"><b style="color:#9d174d">${fmtNum(t.girls)}</b><span>Girls</span></div>
-      <div class="kpi"><b>${ratioTxt(t.boys, t.girls)}</b><span>Boys : Girls</span></div>
-      <div class="kpi ${r.not_connected.total ? 'kpi--amber' : ''}"><b>${fmtNum(r.not_connected.total)}</b><span>Not connected</span></div>
+      <div class="kpi"><b>${fmtNum(nt.networks)}</b><span>Networks</span></div>
+      <div class="kpi"><b>${fmtNum(nt.groups)}</b><span>Lifegroups</span><small class="muted">${t.boys_groups} boys · ${t.girls_groups} girls</small></div>
+      <div class="kpi"><b>${fmtNum(nt.members)}</b><span>Connected</span><small class="muted">${t.boys} boys · ${t.girls} girls</small></div>
+      <div class="kpi kpi--teal"><b>${pctTxt(nt.solid_pct)}</b><span>Closed cell</span><small class="muted">${nt.solid_members} of ${nt.members} members</small></div>
+      <div class="kpi"><b>${nt.solid_groups}<small>/${nt.groups}</small></b><span>Solid Lifegroups</span><small class="muted">${ns.target} in the closed cell each</small></div>
+      <div class="kpi"><b>${pctTxt(nt.consistency_pct)}</b><span>Held, last 4 weeks</span></div>
+      <div class="kpi"><b>${pctTxt(nt.sunday_pct)}</b><span>Members at Lifegen</span><small class="muted">${ns.last_sunday ? fmtDate(ns.last_sunday, { short: true }) : '—'}</small></div>
+      <div class="kpi ${r.not_connected.total ? 'kpi--amber' : ''}"><b>${fmtNum(r.not_connected.total)}</b><span>Not connected</span><small class="muted">${r.not_connected.boys} boys · ${r.not_connected.girls} girls</small></div>
     </div>
 
+    <div class="card mb-2">
+      <div class="card__header"><h2>Network status</h2><span class="hint">ratios per Network · last 4 weeks</span></div>
+      <div class="table-wrap"><table class="table table--stack table--wide">
+        <thead><tr><th>Network</th><th class="num">Lifegroups</th><th class="num">Members</th><th class="num">Closed cell</th><th class="num">Open cell</th><th>Closed %</th><th class="num">Solid groups</th><th class="num">Met this week</th><th>Held (4 wks)</th><th>LG attendance</th><th>Devotion</th><th>At Lifegen</th></tr></thead>
+        <tbody>${ns.networks.map((n) => html`<tr>
+          <td data-label="">${n.id ? html`<a href="#/networks/${n.id}"><b>${n.name}</b></a> ${genderBadge(n.gender)}` : html`<span class="muted">${n.name}</span>`}${n.leader_name ? html`<div class="small muted">${n.leader_name}</div>` : ''}</td>
+          <td data-label="Lifegroups" class="num">${n.groups}</td>
+          <td data-label="Members" class="num"><b>${n.members}</b></td>
+          <td data-label="Closed cell" class="num">${n.solid_members}</td>
+          <td data-label="Open cell" class="num">${n.new_members}</td>
+          <td data-label="Closed %">${bar(n.solid_pct)}</td>
+          <td data-label="Solid groups" class="num">${n.solid_groups}<span class="muted small">/${n.groups}</span></td>
+          <td data-label="Met this week" class="num ${n.met_this_week < n.groups ? 'warn-text' : ''}">${n.met_this_week}<span class="muted small">/${n.groups}</span></td>
+          <td data-label="Held (4 wks)">${bar(n.consistency_pct, n.consistency_pct >= 75 ? 'var(--green-600)' : n.consistency_pct >= 50 ? 'var(--amber-600)' : 'var(--red-600)')}</td>
+          <td data-label="LG attendance">${bar(n.avg_attendance_pct)}${n.avg_present != null ? html`<div class="small muted">avg ${n.avg_present} present</div>` : ''}</td>
+          <td data-label="Devotion">${bar(n.devotion_pct)}</td>
+          <td data-label="At Lifegen">${n.sunday ? bar(n.sunday.pct) : raw('<span class="muted">—</span>')}</td>
+        </tr>`)}</tbody>
+        <tfoot><tr><td data-label="">Total</td><td data-label="Lifegroups" class="num">${nt.groups}</td><td data-label="Members" class="num">${nt.members}</td><td data-label="Closed cell" class="num">${nt.solid_members}</td><td data-label="Open cell" class="num">${nt.members - nt.solid_members}</td><td data-label="Closed %">${pctTxt(nt.solid_pct)}</td><td data-label="Solid groups" class="num">${nt.solid_groups}</td><td data-label="Met this week" class="num">${nt.met_this_week}/${nt.groups}</td><td data-label="Held (4 wks)">${pctTxt(nt.consistency_pct)}</td><td data-label="LG attendance"></td><td data-label="Devotion">${pctTxt(nt.devotion_pct)}</td><td data-label="At Lifegen">${pctTxt(nt.sunday_pct)}</td></tr></tfoot>
+      </table></div>
+      <div class="card__footer small muted">Closed % = closed cell (matagal na, consistent) ÷ all members · Open cell = mga bago · Held = weeks with a Lifegroup ÷ 4 weeks × groups · LG attendance = average present ÷ average group size · Devotion = members with at least one devotion tap in 4 weeks · At Lifegen = members present last Sunday.</div>
+    </div>
+
+    <div class="card mb-2"><div class="card__header"><h2>Boys vs girls</h2></div><div class="card__body card__body--flush"><div class="table-wrap"><table class="table">
+      <thead><tr><th></th><th class="num">Lifegroups</th><th class="num">Solid groups</th><th class="num">Members</th><th class="num">Closed cell</th><th class="num">Closed %</th><th class="num">Met this week</th><th class="num">Held (4 wks)</th></tr></thead>
+      <tbody>${bySex('Boys', ns.by_gender.boys)}${bySex('Girls', ns.by_gender.girls)}</tbody></table></div></div></div>
+
     <div class="card mb-2" id="growthCard">
-      <div class="card__header"><h2>Growth — boys groups vs girls groups</h2><span class="hint">members at end of each month · last ${gr.months.length} month${gr.months.length === 1 ? '' : 's'}</span></div>
+      <div class="card__header"><h2>Growth</h2><span class="hint">members at end of each month · last ${gr.months.length} month${gr.months.length === 1 ? '' : 's'}</span></div>
       <div class="card__body">
         <div class="kpi-row mb-2" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">
           <div class="kpi kpi--blue"><b>${delta(gs.boys.change_30d, gs.boys.pct_30d)}</b><span>Boys groups · 30 days</span><small class="muted">${gs.boys.days30_ago} → ${gs.boys.now} members</small></div>
           <div class="kpi" style="background:#fdf2f8;border-color:#fbcfe8"><b>${delta(gs.girls.change_30d, gs.girls.pct_30d)}</b><span>Girls groups · 30 days</span><small class="muted">${gs.girls.days30_ago} → ${gs.girls.now} members</small></div>
           <div class="kpi kpi--blue"><b>${delta(gs.boys.change_90d, gs.boys.pct_90d)}</b><span>Boys groups · 90 days</span><small class="muted">${gs.boys.days90_ago} → ${gs.boys.now} members</small></div>
           <div class="kpi" style="background:#fdf2f8;border-color:#fbcfe8"><b>${delta(gs.girls.change_90d, gs.girls.pct_90d)}</b><span>Girls groups · 90 days</span><small class="muted">${gs.girls.days90_ago} → ${gs.girls.now} members</small></div>
-          <div class="kpi"><b>${growthRatio(gs)}</b><span>Growth ratio (30 d)</span><small class="muted">boys : girls, new members</small></div>
         </div>
         ${raw(multiLineChart(gr.months.map((m) => monthLabel(m.month)), [{ name: 'Boys groups', color: '#2563eb', values: gr.months.map((m) => m.boys_end) }, { name: 'Girls groups', color: '#db2777', values: gr.months.map((m) => m.girls_end) }], { aria: 'Members in boys groups and girls groups per month' }))}
         <div class="table-wrap mt-2"><table class="table table--stack table--compact">
@@ -242,55 +272,26 @@ async function renderLifegroupReport({ main }) {
             <td data-label="Girls groups" class="num"><b>${m.girls_end}</b></td><td data-label="Joined" class="num">${m.girls_joined ? '+' + m.girls_joined : '0'}</td><td data-label="Left" class="num">${m.girls_left ? '−' + m.girls_left : '0'}</td><td data-label="Growth" class="num">${pctDelta(m.girls_growth_pct)}</td>
           </tr>`)}</tbody>
         </table></div>
-        <p class="small muted mt-1">Growth = change in members versus the previous month. Members who moved between groups count as left + joined. <a href="#" id="growthCsv">Download growth CSV</a></p>
+        <p class="small muted mt-1">Growth = change in members versus the previous month. <a href="#" id="growthCsv">Download growth CSV</a></p>
       </div>
-    </div>
-
-    <div class="grid grid--2 mb-2">
-      <div class="card">
-        <div class="card__header"><h2>All Lifegroups</h2><span class="hint">${t.members} current members</span></div>
-        <div class="card__body">${raw(donutChart([{ label: 'Boys', value: t.boys, color: '#2563eb' }, { label: 'Girls', value: t.girls, color: '#db2777' }, ...(t.unknown ? [{ label: 'Not set', value: t.unknown, color: '#cbd5e1' }] : [])], { centerLabel: 'members' }))}</div>
-      </div>
-      <div class="card">
-        <div class="card__header"><h2>Not yet in a Lifegroup</h2><a class="small" href="#/lifegroups?tab=needs">Needs Lifegroup ${icon('chevR', 13)}</a></div>
-        <div class="card__body">
-          ${ratioBar(r.not_connected.boys, r.not_connected.girls, r.not_connected.total)}
-          <p class="small muted mt-2">Active people (not inactive / archived) who have no current Lifegroup. ${r.not_connected.total ? 'Use this to balance new boys’ and girls’ groups.' : 'Everyone is connected.'}</p>
-        </div>
-      </div>
-    </div>
-
-    <div class="card mb-2">
-      <div class="card__header"><h2>Per Network</h2></div>
-      <div class="table-wrap"><table class="table table--stack">
-        <thead><tr><th>Network</th><th>Network leader</th><th class="num">Boys groups</th><th class="num">Girls groups</th><th class="num">Members</th><th class="num">Boys</th><th class="num">Girls</th><th>Ratio</th><th class="num">Boys %</th><th class="num">Girls %</th></tr></thead>
-        <tbody>${r.networks.map((n) => html`<tr>
-          <td data-label="">${n.network_id ? html`<a href="#/networks/${n.network_id}"><b>${n.network_name}</b></a> ${genderBadge(n.network_gender, { long: false })}` : html`<span class="muted">${n.network_name}</span>`}</td>
-          <td data-label="Network leader">${n.network_leader_name || raw('<span class="muted">—</span>')}</td>
-          <td data-label="Boys groups" class="num">${n.boys_groups}</td><td data-label="Girls groups" class="num">${n.girls_groups}</td><td data-label="Members" class="num"><b>${n.members}</b></td>
-          <td data-label="Boys" class="num">${n.boys}</td><td data-label="Girls" class="num">${n.girls}</td>
-          <td data-label="Ratio">${ratioBar(n.boys, n.girls, n.members, { compact: true })}</td>
-          <td data-label="Boys %" class="num">${pctTxt(n.boys_pct)}</td><td data-label="Girls %" class="num">${pctTxt(n.girls_pct)}</td>
-        </tr>`)}</tbody>
-        <tfoot><tr><td data-label="">Total</td><td data-label=""></td><td data-label="Boys groups" class="num">${t.boys_groups}</td><td data-label="Girls groups" class="num">${t.girls_groups}</td><td data-label="Members" class="num">${t.members}</td><td data-label="Boys" class="num">${t.boys}</td><td data-label="Girls" class="num">${t.girls}</td><td data-label="Ratio">${ratioTxt(t.boys, t.girls)}</td><td data-label="Boys %" class="num">${pctTxt(t.boys_pct)}</td><td data-label="Girls %" class="num">${pctTxt(t.girls_pct)}</td></tr></tfoot>
-      </table></div>
     </div>
 
     <div class="card">
       <div class="card__header"><h2>Per Lifegroup</h2><span class="hint">active groups only</span></div>
       <div class="table-wrap"><table class="table table--stack">
-        <thead><tr><th>Network</th><th>Lifegroup</th><th>Leader</th><th class="num">Members</th><th class="num">Boys</th><th class="num">Girls</th><th>Ratio</th><th class="num">Boys %</th><th class="num">Girls %</th><th class="num">Last 30 days</th></tr></thead>
-        <tbody>${r.groups.map((g) => html`<tr>
+        <thead><tr><th>Network</th><th>Lifegroup</th><th>Leader</th><th class="num">Members</th><th class="num">Closed cell</th><th class="num">Open cell</th><th>Closed %</th><th class="num">Last 30 days</th></tr></thead>
+        <tbody>${r.groups.map((g) => { const sg = solidOf(g); return html`<tr>
           <td data-label="Network">${g.network_name || raw('<span class="muted">—</span>')}</td>
-          <td data-label=""><a href="#/lifegroups/${g.group_id}"><b>${g.group_name}</b></a> ${genderBadge(g.gender)}${g.area ? html`<div class="small muted">${g.area}</div>` : ''}</td>
+          <td data-label=""><a href="#/lifegroups/${g.group_id}"><b>${g.group_name}</b></a> ${genderBadge(g.gender)}</td>
           <td data-label="Leader">${g.leader_name || raw('<span class="muted">—</span>')}</td>
-          <td data-label="Members" class="num"><b>${g.members}</b></td><td data-label="Boys" class="num">${g.boys}</td><td data-label="Girls" class="num">${g.girls}</td>
-          <td data-label="Ratio">${ratioBar(g.boys, g.girls, g.members, { compact: true })}</td>
-          <td data-label="Boys %" class="num">${pctTxt(g.boys_pct)}</td><td data-label="Girls %" class="num">${pctTxt(g.girls_pct)}</td>
+          <td data-label="Members" class="num"><b>${g.members}</b></td>
+          <td data-label="Closed cell" class="num">${sg ? sg.solid : '—'}</td>
+          <td data-label="Open cell" class="num">${sg ? g.members - sg.solid : '—'}</td>
+          <td data-label="Closed %">${sg && g.members ? bar(Math.round((sg.solid / g.members) * 100)) : raw('<span class="muted">—</span>')}</td>
           <td data-label="Last 30 days" class="num">${delta(g.net_30d, g.growth_30d_pct)}</td>
-        </tr>`)}</tbody>
+        </tr>`; })}</tbody>
       </table></div>
-    </div>
-    ${t.unknown ? html`<p class="small muted mt-2">${t.unknown} member${t.unknown === 1 ? ' has' : 's have'} no sex set on their profile — edit the person to include them in the ratio.</p>` : ''}`;
+    </div>`;
+  function solidOf(g) { return r.group_solid ? r.group_solid[g.group_id] : null; }
   report.querySelector('#growthCsv')?.addEventListener('click', (e) => { e.preventDefault(); downloadUrl('/api/reports/export/lifegroup-growth.csv'); });
 }

@@ -5,6 +5,7 @@ const { getDb } = require('../db');
 const { wrap, clean, isValidDate, HttpError, toCsv, sendCsv, quarterRange, monthRange } = require('../lib/util');
 const { requirePermission, can } = require('../middleware/auth');
 const stats = require('../services/stats');
+const prog = require('../services/lifegroup-progress');
 
 const router = express.Router();
 
@@ -205,7 +206,9 @@ function lifegroupReport(db) {
     const net = r.joined_30d - r.left_30d; const base = g.members - net;
     return { ...g, joined_30d: r.joined_30d, left_30d: r.left_30d, net_30d: net, growth_30d_pct: base > 0 ? Math.round((net / base) * 1000) / 10 : (net > 0 ? null : 0) };
   };
-  return { groups: groups.map(finish).map(withGrowth), networks: [...byNet.values()].map(finish), totals: finish(totals), not_connected: { total: nc.total || 0, boys: nc.boys || 0, girls: nc.girls || 0 }, growth: growthSeries(db) };
+  const groupSolid = {};
+  for (const row of db.prepare(`SELECT m.lifegroup_id AS gid, COUNT(*) AS solid FROM lifegroup_memberships m JOIN people p ON p.id = m.person_id WHERE m.left_at IS NULL AND p.archived_at IS NULL AND m.tier = 'solid' GROUP BY m.lifegroup_id`).all()) groupSolid[row.gid] = { solid: Number(row.solid) };
+  return { groups: groups.map(finish).map(withGrowth), group_solid: groupSolid, networks: [...byNet.values()].map(finish), totals: finish(totals), not_connected: { total: nc.total || 0, boys: nc.boys || 0, girls: nc.girls || 0 }, growth: growthSeries(db) };
 }
 
 /** Monthly growth of boys groups vs girls groups: members at month end, joins, leaves, % growth vs previous month. */
@@ -251,13 +254,31 @@ router.get('/lifegroups', requirePermission('lifegroups:view'), wrap((req, res) 
   res.json(lifegroupReport(getDb()));
 }));
 
+// GET /api/reports/network-status — statistics per network (solid %, consistency, attendance, devotion)
+router.get('/network-status', requirePermission('lifegroups:view'), wrap((req, res) => {
+  res.json(prog.networkStatus(getDb()));
+}));
+// GET /api/reports/export/network-status.csv
+router.get('/export/network-status.csv', requirePermission('lifegroups:view'), wrap((req, res) => {
+  const r = prog.networkStatus(getDb());
+  const row = (n) => ({ network: n.name, type: n.gender === 'boys' ? 'Boys' : n.gender === 'girls' ? 'Girls' : '', network_leader: n.leader_name || '', lifegroups: n.groups, leaders: n.leaders, members: n.members,
+    closed_cell: n.solid_members, open_cell: n.new_members, closed_pct: n.solid_pct ?? '', solid_groups: n.solid_groups, solid_groups_pct: n.solid_groups_pct ?? '',
+    met_this_week: `${n.met_this_week}/${n.groups}`, held_last_4_weeks_pct: n.consistency_pct ?? '', avg_present_per_meeting: n.avg_present ?? '', avg_lg_attendance_pct: n.avg_attendance_pct ?? '',
+    devotion_members_4w: n.devotion_members, devotion_pct: n.devotion_pct ?? '', sunday_date: n.sunday ? n.sunday.date : '', sunday_present: n.sunday ? n.sunday.present : '', sunday_pct: n.sunday && n.sunday.pct != null ? n.sunday.pct : '' });
+  const rows = r.networks.map(row);
+  const t = r.totals;
+  rows.push({ network: 'TOTAL', type: '', network_leader: '', lifegroups: t.groups, leaders: '', members: t.members, closed_cell: t.solid_members, open_cell: t.new_members, closed_pct: t.solid_pct ?? '', solid_groups: t.solid_groups, solid_groups_pct: t.solid_groups_pct ?? '', met_this_week: `${t.met_this_week}/${t.groups}`, held_last_4_weeks_pct: t.consistency_pct ?? '', avg_present_per_meeting: '', avg_lg_attendance_pct: '', devotion_members_4w: t.devotion_members, devotion_pct: t.devotion_pct ?? '', sunday_date: r.last_sunday || '', sunday_present: '', sunday_pct: t.sunday_pct ?? '' });
+  sendCsv(res, 'lifegen-network-status.csv', toCsv(['network', 'type', 'network_leader', 'lifegroups', 'leaders', 'members', 'closed_cell', 'open_cell', 'closed_pct', 'solid_groups', 'solid_groups_pct', 'met_this_week', 'held_last_4_weeks_pct', 'avg_present_per_meeting', 'avg_lg_attendance_pct', 'devotion_members_4w', 'devotion_pct', 'sunday_date', 'sunday_present', 'sunday_pct'], rows));
+}));
+
 // GET /api/reports/export/lifegroups.csv — one row per active group
 router.get('/export/lifegroups.csv', requirePermission('lifegroups:view'), wrap((req, res) => {
   const r = lifegroupReport(getDb());
-  const rows = r.groups.map((g) => ({ network: g.network_name || '', network_leader: g.network_leader_name || '', group: g.group_name, type: g.gender === 'boys' ? 'Boys group' : g.gender === 'girls' ? 'Girls group' : '', leader: g.leader_name || '', area: g.area || '',
-    members: g.members, boys: g.boys, girls: g.girls, unknown: g.unknown, boys_pct: g.boys_pct ?? '', girls_pct: g.girls_pct ?? '', joined_30d: g.joined_30d, left_30d: g.left_30d, net_30d: g.net_30d, growth_30d_pct: g.growth_30d_pct ?? '' }));
-  rows.push({ network: 'TOTAL', network_leader: '', group: '', type: `${r.totals.boys_groups} boys groups / ${r.totals.girls_groups} girls groups`, leader: '', area: '', members: r.totals.members, boys: r.totals.boys, girls: r.totals.girls, unknown: r.totals.unknown, boys_pct: r.totals.boys_pct ?? '', girls_pct: r.totals.girls_pct ?? '' });
-  sendCsv(res, 'lifegen-lifegroups.csv', toCsv(['network', 'network_leader', 'group', 'type', 'leader', 'area', 'members', 'boys', 'girls', 'unknown', 'boys_pct', 'girls_pct', 'joined_30d', 'left_30d', 'net_30d', 'growth_30d_pct'], rows));
+  const rows = r.groups.map((g) => { const solid = r.group_solid[g.group_id] ? r.group_solid[g.group_id].solid : 0; return { network: g.network_name || '', network_leader: g.network_leader_name || '', group: g.group_name, type: g.gender === 'boys' ? 'Boys group' : g.gender === 'girls' ? 'Girls group' : '', leader: g.leader_name || '',
+    members: g.members, closed_cell: solid, open_cell: g.members - solid, closed_pct: g.members ? Math.round((solid / g.members) * 100) : '', joined_30d: g.joined_30d, left_30d: g.left_30d, net_30d: g.net_30d, growth_30d_pct: g.growth_30d_pct ?? '' }; });
+  const totalSolid = rows.reduce((a, x) => a + x.solid_members, 0);
+  rows.push({ network: 'TOTAL', network_leader: '', group: '', type: `${r.totals.boys_groups} boys groups / ${r.totals.girls_groups} girls groups`, leader: '', members: r.totals.members, closed_cell: totalSolid, open_cell: r.totals.members - totalSolid, closed_pct: r.totals.members ? Math.round((totalSolid / r.totals.members) * 100) : '' });
+  sendCsv(res, 'lifegen-lifegroups.csv', toCsv(['network', 'network_leader', 'group', 'type', 'leader', 'members', 'closed_cell', 'open_cell', 'closed_pct', 'joined_30d', 'left_30d', 'net_30d', 'growth_30d_pct'], rows));
 }));
 
 // GET /api/reports/export/lifegroup-growth.csv — month by month, boys groups vs girls groups

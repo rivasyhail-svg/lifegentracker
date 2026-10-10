@@ -63,7 +63,7 @@ export function personFormHtml(p = {}, { compact = false, defaults = {} } = {}) 
         ${field('middle_name', 'Middle name')}
         ${field('birthdate', 'Birthday', { type: 'date' })}
         <div class="field"><label for="f_sex">Sex<span class="opt">optional</span></label>
-          <select id="f_sex" name="sex"><option value="">—</option><option value="male" ${v('sex') === 'male' ? 'selected' : ''}>Male (boy)</option><option value="female" ${v('sex') === 'female' ? 'selected' : ''}>Female (girl)</option></select><span class="help">Needed before joining a Lifegroup — groups are boys-only or girls-only.</span></div>
+          <select id="f_sex" name="sex"><option value="">—</option><option value="male" ${v('sex') === 'male' ? 'selected' : ''}>Male (boy)</option><option value="female" ${v('sex') === 'female' ? 'selected' : ''}>Female (girl)</option></select></div>
         ${field('email', 'Email', { type: 'email', autocomplete: 'email' })}
         ${field('address', 'Address', { span: true, autocomplete: 'street-address' })}
         <div class="field span-2"><label class="toggle" for="f_privacy_consent"><input type="checkbox" id="f_privacy_consent" name="privacy_consent" value="1" ${p?.privacy_consent_at ? 'checked' : ''} /> The person agreed that Lifegen keeps their details for attendance and Lifegroup follow-up</label>
@@ -77,18 +77,6 @@ export function personFormHtml(p = {}, { compact = false, defaults = {} } = {}) 
         ${field('date_registered', 'Date registered', { type: 'date' })}
         ${field('date_first_attended', 'Date first attended', { type: 'date', help: 'Set automatically on the first recorded Sunday if left blank.' })}
         ${field('notes', 'Notes', { type: 'textarea', span: true })}`}
-      </div>
-    </div>
-    <div class="form-section">
-      <h3>Lifegroup preferences <span class="opt" style="font-weight:400">optional</span></h3>
-      <p class="desc">Ask where and when they can join a Lifegroup — used for “Recommended Lifegroups”.</p>
-      <div class="form-grid">
-        ${field('preferred_area', 'Preferred area', { placeholder: 'e.g. Kaybanban' })}
-        <div class="field"><label for="f_preferred_day">Preferred day<span class="opt">optional</span></label>
-          <select id="f_preferred_day" name="preferred_day"><option value="">Any</option>${Object.entries(DAY_LABELS).map(([k, l]) => html`<option value="${k}" ${v('preferred_day') === k ? 'selected' : ''}>${l}</option>`)}</select></div>
-        <div class="field"><label for="f_preferred_time">Preferred time<span class="opt">optional</span></label>
-          <select id="f_preferred_time" name="preferred_time"><option value="">Any</option>${Object.entries(TIME_LABELS).map(([k, l]) => html`<option value="${k}" ${v('preferred_time') === k ? 'selected' : ''}>${l}</option>`)}</select></div>
-        ${compact ? '' : field('preferred_category', 'Age / category', { placeholder: 'e.g. Students, Young Pro' })}
       </div>
     </div>`;
 }

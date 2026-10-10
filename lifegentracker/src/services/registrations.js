@@ -174,7 +174,9 @@ function submit(body, meta = {}) {
 }
 
 function get(db, id) {
-  return db.prepare(`SELECT r.*, p.person_code, u.display_name AS reviewed_by_name
+  return db.prepare(`SELECT r.*, p.person_code, u.display_name AS reviewed_by_name,
+             (SELECT g.name FROM lifegroup_memberships m JOIN lifegroups g ON g.id = m.lifegroup_id WHERE m.person_id = r.person_id AND m.left_at IS NULL LIMIT 1) AS lifegroup_name,
+             (SELECT m.lifegroup_id FROM lifegroup_memberships m WHERE m.person_id = r.person_id AND m.left_at IS NULL LIMIT 1) AS lifegroup_id
       FROM registrations r LEFT JOIN people p ON p.id = r.person_id LEFT JOIN users u ON u.id = r.reviewed_by WHERE r.id = ?`).get(id);
 }
 
@@ -186,6 +188,39 @@ function reviewContext(db, reg) {
       FROM lifegroups g LEFT JOIN people lp ON lp.id = g.leader_person_id
      WHERE g.is_active = 1 AND lower(COALESCE(lp.first_name || ' ' || lp.last_name, g.leader_name)) = lower(?) LIMIT 3`).all(reg.leader_name);
   return { same_name: sameName, same_email: sameEmail || null, matching_groups: leaderMatch };
+}
+
+/**
+ * After approval, put the person straight under the Lifegroup of the leader they named (as open cell / new),
+ * so the leader sees them on the QR page without the admin assigning by hand.
+ * Match = active group whose leader name equals the typed leader name (case-insensitive); when several leaders
+ * share a name, the one whose network leader matches wins; otherwise nothing is done (admin assigns manually).
+ */
+function autoPlace(db, pid, reg, user) {
+  if (!reg.leader_name) return null;
+  const cur = db.prepare('SELECT lifegroup_id FROM lifegroup_memberships WHERE person_id = ? AND left_at IS NULL').get(pid);
+  if (cur) return null; // already in a Lifegroup — never move people automatically
+  const rows = db.prepare(`SELECT g.id, g.name, g.gender, g.capacity, COALESCE(lp.first_name || ' ' || lp.last_name, g.leader_name) AS leader_name,
+        COALESCE(np.first_name || ' ' || np.last_name, n.leader_name) AS network_leader_name,
+        (SELECT COUNT(*) FROM lifegroup_memberships m JOIN people p ON p.id = m.person_id WHERE m.lifegroup_id = g.id AND m.left_at IS NULL AND p.archived_at IS NULL) AS member_count
+      FROM lifegroups g LEFT JOIN people lp ON lp.id = g.leader_person_id LEFT JOIN networks n ON n.id = g.network_id LEFT JOIN people np ON np.id = n.leader_person_id
+     WHERE g.is_active = 1 AND lower(COALESCE(lp.first_name || ' ' || lp.last_name, g.leader_name)) = lower(?)`).all(reg.leader_name);
+  if (!rows.length) return null;
+  let pick = rows[0];
+  if (rows.length > 1) {
+    const byNet = rows.filter((r) => r.network_leader_name && reg.network_leader_name && r.network_leader_name.toLowerCase() === reg.network_leader_name.toLowerCase());
+    if (byNet.length !== 1) return null; // ambiguous — leave it to the admin
+    pick = byNet[0];
+  }
+  const person = db.prepare('SELECT sex FROM people WHERE id = ?').get(pid);
+  const want = pick.gender === 'boys' ? 'male' : pick.gender === 'girls' ? 'female' : null;
+  if (person.sex && want && person.sex !== want) return null; // never put a girl in a boys group or vice versa
+  if (!person.sex && want) db.prepare("UPDATE people SET sex = ?, updated_at = datetime('now') WHERE id = ?").run(want, pid); // the group tells us
+  const today = new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);
+  db.prepare("INSERT INTO lifegroup_memberships (person_id, lifegroup_id, role, tier, joined_at, assigned_by, notes) VALUES (?, ?, 'member', 'new', ?, ?, ?)")
+    .run(pid, pick.id, today, user ? user.id : null, `Placed automatically from QR registration ${reg.ref_code} (leader: ${reg.leader_name})`);
+  activity.log(db, user, 'lifegroup.assign', 'person', pid, `Placed under ${pick.name} (open cell) automatically — leader named on QR registration ${reg.ref_code}`);
+  return { id: pick.id, name: pick.name, leader_name: pick.leader_name, full: pick.capacity != null && pick.member_count + 1 > pick.capacity };
 }
 
 /**
@@ -224,10 +259,14 @@ function approve(db, id, user, { mode = 'create', person_id = null, status = 'fi
     db.prepare("UPDATE registrations SET status = 'approved', person_id = ?, approved_at = datetime('now'), rejected_at = NULL, reviewed_by = ?, updated_at = datetime('now') WHERE id = ?").run(pid, user ? user.id : null, id);
     const p = db.prepare('SELECT person_code, first_name, last_name FROM people WHERE id = ?').get(pid);
     activity.log(db, user, 'registration.approve', 'registration', id, `${user ? 'Approved' : 'Auto-approved'} QR registration ${reg.ref_code} → ${p.first_name} ${p.last_name} (${p.person_code})${mode === 'link' ? ' (linked to existing person)' : ''}`);
-    return pid;
+    const placed = autoPlace(db, pid, reg, user);
+    return { pid, placed };
   });
   try {
-    return run();
+    const out = run();
+    if (out.placed) { try { require('./networks-auto').syncNetworks(db, user || null); } catch { /* best effort */ } }
+    approve.lastPlacement = out.placed;
+    return out.pid;
   } catch (err) {
     if (isSqliteUnique(err, 'email_normalized')) throw new HttpError(409, 'A person with this email already exists — link the registration to that person instead.');
     throw err;
@@ -361,7 +400,9 @@ function list(db, { status = 'pending', q = '' } = {}) {
     where.push('(r.full_name LIKE @q OR r.email LIKE @q OR r.school LIKE @q OR r.leader_name LIKE @q OR r.network_leader_name LIKE @q OR r.ministry LIKE @q OR r.ref_code LIKE @q)');
     params.q = `%${qq}%`;
   }
-  return db.prepare(`SELECT r.*, p.person_code, u.display_name AS reviewed_by_name
+  return db.prepare(`SELECT r.*, p.person_code, u.display_name AS reviewed_by_name,
+             (SELECT g.name FROM lifegroup_memberships m JOIN lifegroups g ON g.id = m.lifegroup_id WHERE m.person_id = r.person_id AND m.left_at IS NULL LIMIT 1) AS lifegroup_name,
+             (SELECT m.lifegroup_id FROM lifegroup_memberships m WHERE m.person_id = r.person_id AND m.left_at IS NULL LIMIT 1) AS lifegroup_id
       FROM registrations r LEFT JOIN people p ON p.id = r.person_id LEFT JOIN users u ON u.id = r.reviewed_by
       ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
       ORDER BY CASE r.status WHEN 'pending' THEN 0 ELSE 1 END, r.submitted_at DESC LIMIT 500`).all(params);

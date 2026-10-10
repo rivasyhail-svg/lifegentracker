@@ -115,7 +115,7 @@ function checkGenderRules(db, data, existingId = null) {
 function membershipFor(db, personId, user) {
   const rows = db
     .prepare(
-      `SELECT m.id, m.lifegroup_id, m.role, m.joined_at, m.left_at, m.notes, g.name, g.gender, g.area, g.schedule_day, g.schedule_time,
+      `SELECT m.id, m.lifegroup_id, m.role, m.tier, m.joined_at, m.left_at, m.notes, g.name, g.gender, g.schedule_day, g.schedule_time,
               g.is_active, g.leader_person_id, g.leader_name AS leader_fallback, lp.first_name AS lf, lp.last_name AS ll,
               g.network_id, n.name AS network_name, n.leader_person_id AS network_leader_person_id,
               COALESCE(nl.first_name || ' ' || nl.last_name, n.leader_name) AS network_leader_name,
@@ -145,7 +145,6 @@ function recommend(db, prefs, user, limit = 8) {
   return groups
     .map((g) => {
       let score = 0; const why = [];
-      if (area && g.area && g.area.toLowerCase() === area) { score += 3; why.push('same area'); }
       if (day && g.schedule_day === day) { score += 2; why.push('preferred day'); }
       if (time && g.time_bucket === time) { score += 1; why.push('preferred time'); }
       if (cat && g.category && g.category.toLowerCase() === cat) { score += 1; why.push('matching category'); }
@@ -173,7 +172,7 @@ router.get('/', requirePermission('lifegroups:view'), wrap((req, res) => {
   const status = clean(req.query.status) || 'active';
   if (status === 'active') where.push('g.is_active = 1');
   else if (status === 'inactive') where.push('g.is_active = 0');
-  const rows = db.prepare(`${GROUP_SELECT} ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY g.is_active DESC, g.area COLLATE NOCASE, g.name COLLATE NOCASE`).all(params);
+  const rows = db.prepare(`${GROUP_SELECT} ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY g.is_active DESC, g.gender, g.name COLLATE NOCASE`).all(params);
   const solidTarget = prog.target(prog.settings(db));
   res.json(rows.map((g) => ({ ...shape(g, req.user), solid_target: solidTarget })));
 }));
@@ -204,8 +203,10 @@ function overview(db) {
           AND p.date_registered >= date('now', '-60 days')) AS new_needing
     FROM people p WHERE p.archived_at IS NULL AND p.status <> 'inactive'`).get();
   const networks = db.prepare('SELECT COUNT(*) n FROM networks WHERE is_active = 1').get().n;
+  const cells = db.prepare(`SELECT SUM(m.tier = 'solid') AS closed, SUM(m.tier <> 'solid') AS open FROM lifegroup_memberships m JOIN people p ON p.id = m.person_id JOIN lifegroups g ON g.id = m.lifegroup_id
+      WHERE m.left_at IS NULL AND p.archived_at IS NULL AND g.is_active = 1`).get();
   return {
-    networks,
+    networks, closed_cell: Number(cells.closed) || 0, open_cell: Number(cells.open) || 0,
     total_groups: g.total || 0, active_groups: g.active || 0, boys_groups: g.boys_groups || 0, girls_groups: g.girls_groups || 0, groups_with_slots: g.with_slots || 0, total_leaders: leaders || 0,
     with_group: p.with_group || 0, without_group: p.without_group || 0, new_needing_connection: p.new_needing || 0,
   };

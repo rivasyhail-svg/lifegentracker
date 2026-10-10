@@ -919,3 +919,78 @@ details[open] > summary .t-open { display: none; } details:not([open]) > summary
 .checklist__item .badge { margin-left: auto; }
 .table--grid th.num, .table--grid td.num { text-align: center; padding-left: 4px; padding-right: 4px; }
 .table--grid th.small { font-weight: 500; white-space: nowrap; }
+
+/* ==========================================================================
+   Lifegroup members: tap chips (leader page), 4-week member dots, member sections
+   ========================================================================== */
+.table--wide { min-width: 880px; }
+@media (min-width: 641px) { .table--wide td, .table--wide th { white-space: nowrap; } .table--wide td .small, .table--wide td .code { white-space: nowrap; } }
+.chip-group { margin-top: 10px; }
+.chip-group__title { font-size: .78rem; font-weight: 600; color: var(--muted); margin: 10px 0 6px; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { display: inline-flex; align-items: stretch; border: 1px solid var(--border); border-radius: 999px; background: #fff; overflow: hidden; max-width: 100%; }
+.chip__main { display: inline-flex; align-items: center; gap: 8px; padding: 9px 12px 9px 10px; background: transparent; border: 0; font: inherit; color: var(--text); cursor: pointer; min-height: 42px; text-align: left; }
+.chip__check { width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid #c3c7cd; flex: none; position: relative; }
+.chip--on { border-color: var(--green-600); background: var(--green-100); }
+.chip--on .chip__check { background: var(--green-600); border-color: var(--green-600); }
+.chip--on .chip__check::after { content: ''; position: absolute; left: 4.5px; top: 1.5px; width: 4px; height: 8px; border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg); }
+.chip__name { font-weight: 600; font-size: .9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 48vw; }
+.chip__devo { border: 0; border-left: 1px solid var(--border); background: transparent; font: inherit; font-size: .72rem; font-weight: 700; letter-spacing: .03em; color: var(--muted); padding: 0 11px; cursor: pointer; min-width: 46px; }
+.chip--on .chip__devo { border-left-color: #bbf7d0; }
+.chip__devo--on { background: var(--brand-900); color: #fff !important; }
+.chip--new .chip__main { cursor: default; }
+.newbies { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.mlist { display: flex; flex-direction: column; }
+.mlist__row { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--ink-100); }
+.mlist__row:last-child { border-bottom: 0; }
+.mlist__who { flex: 1; min-width: 0; }
+.mlist__who b { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.m4 { display: inline-flex; gap: 3px; flex: none; }
+.m4__c { display: inline-block; width: 12px; height: 12px; border-radius: 3px; background: var(--ink-100); border: 1px solid transparent; position: relative; }
+.m4__c--on { background: var(--green-600); }
+.m4__c--off { background: #fff; border-color: #e5484d; }
+.m4__c--none { background: transparent; border: 1px dashed #c3c7cd; }
+.m4__c--devo::after { content: ''; position: absolute; right: -2px; top: -2px; width: 6px; height: 6px; border-radius: 50%; background: var(--brand-900); border: 1px solid #fff; }
+.m4__c--key { vertical-align: -2px; margin: 0 2px 0 4px; }
+.netgrp summary { list-style: none; cursor: pointer; }
+.netgrp summary::-webkit-details-marker { display: none; }
+.member-sections .section-title { margin-top: 0; }
+.member-sections .table { margin-bottom: 0; }
+.member-sections .sect-head { padding: 8px 16px; font-size: .78rem; font-weight: 600; color: var(--muted); background: var(--ink-50); border-bottom: 1px solid var(--border); }
+.pbar { display: inline-block; width: 64px; height: 6px; border-radius: 999px; background: var(--ink-100); vertical-align: middle; margin-right: 6px; overflow: hidden; }
+.pbar i { display: block; height: 100%; border-radius: 999px; }
+.warn-text { color: #92400e; }
+@media (max-width: 640px) { .table--wide { min-width: 0; } }
+
+.cells { display: grid; grid-template-columns: 1fr 1fr; gap: 0; }
+.cells .cell { min-width: 0; border-right: 1px solid var(--border); }
+.cells .cell:last-child { border-right: 0; }
+.cell__head { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; padding: 10px 16px; border-bottom: 1px solid var(--border); background: var(--ink-50); font-size: .86rem; }
+.cell--closed .cell__head { background: var(--green-100); }
+.cell__hint { margin-left: auto; font-weight: 400; }
+.cells .table { margin: 0; }
+.cells .table th { font-size: .72rem; }
+@media (max-width: 900px) { .cells { grid-template-columns: 1fr; } .cells .cell { border-right: 0; border-bottom: 1px solid var(--border); } .cells .cell:last-child { border-bottom: 0; } }
+.kpi--link { display: block; text-decoration: none; color: inherit; cursor: pointer; }
+.kpi--link:hover { border-color: var(--brand-600); background: var(--ink-50); }
+.mlist__act { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.mlist__off { color: var(--muted); }
+.reg-wrap .cells .cell { border-right: 1px solid var(--border); }
+.cells .table-wrap { overflow-x: auto; }
+.cells .table td.actions { white-space: nowrap; }
+.cells .table td.actions .btn { padding: 4px 8px; }
+.cells .table td, .cells .table th { padding: 10px 10px; }
+.cells .table td:first-child, .cells .table th:first-child { padding-left: 16px; white-space: normal; }
+.cells .table td.actions { padding-right: 12px; }
+.cells .table td.actions .btn { display: block; width: 100%; margin: 0 0 4px; text-align: center; }
+.cells .table td.actions .btn:last-child { margin-bottom: 0; }
+.cells .table td.actions { width: 1%; }
+/* Leader page member rows: name + stats on the first line, dots + buttons on the second (phones). */
+.mlist__row { flex-wrap: wrap; }
+.mlist__who { flex: 1 1 160px; }
+.mlist__who .small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mlist__act { margin-left: auto; }
+@media (max-width: 560px) {
+  .mlist__who { flex: 1 1 100%; }
+  .mlist__row .m4 { margin-right: auto; }
+}

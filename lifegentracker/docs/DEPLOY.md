@@ -151,3 +151,79 @@ Find the laptop IP (`ipconfig` / `ifconfig`, e.g. 192.168.1.20) → phones on th
 | `LIFEGEN_AUTO_BACKUP` | on | daily `.db` snapshots (keeps 14); auto-skipped on hosted databases |
 | `LIFEGEN_DB_URL` | — | `libsql://…turso.io` (Turso/libSQL) **or** `postgresql://…` (Supabase/any Postgres) → hosted database instead of a local file |
 | `LIFEGEN_DB_TOKEN` | — | auth token for a Turso `LIFEGEN_DB_URL` (not used for Postgres — the password is in the URI) |
+
+## QR anti-fake protection (Settings → QR registration)
+
+No external services are used (no SMS/email OTP, no CAPTCHA). Everything runs inside LifegenTracker:
+
+| Rule | Default | Where |
+|---|---|---|
+| Registration window | **Sundays only, 12:00 PM – 5:00 PM** (Asia/Manila) — "Open now for 3 h" override for special events | Settings → Anti-fake protection |
+| QR mode | **Reusable** (one print) or **Rotating** (new `?k=` code each Mon–Sun week; "New QR code" invalidates the current print at once) | same |
+| One registration per phone | on — signed `lg_dev` cookie; second attempt shows the earlier reference; rejected rows free the phone | same |
+| Auto-pause | more than 60 submissions in 60 min → form paused, admin **Resume** | same + banner in Registrations |
+| Per-network limit | 50 per IP per day (church Wi-Fi is shared → keep generous) | same |
+| Real-name rules | always on: ≥ 2 real words, no "test/asdf/…", no repeated letters, placeholder names (Juan Dela Cruz) flagged not rejected | server (`src/services/qrguard.js`) |
+| Email rules | always on: Gmail dots / `+tag` / googlemail = same inbox; temporary-mail domains rejected; `gmail.con` typos caught | server |
+| Form timing | form open < 6 s → "too fast"; token older than 4 h → refresh; `LIFEGEN_MIN_FORM_SECONDS` overrides | server |
+| Blocklist | email / domain / phone / IP — from the Reject dialog ("Also block…") or Settings → Blocklist; bulk reject in the inbox | Registrations |
+
+Risk hints shown in the inbox: *Filled in under 20 s*, *Same phone*, *Burst*, *Odd email*, *Placeholder name*. They never block — the admin decides.
+
+## Sunday lock, automatic Networks and Lifegroup progress (2026-10-09)
+
+**Attendance — Sunday only.** With *Settings → Attendance & Lifegroup rules → Sunday-only attendance marking* ON
+(default), the PRESENT button works only on the actual Sunday (Philippine time, `qr_timezone`). Any other date is a
+*correction*: Admins only, a reason is required, and the reason is stored in `attendance_audit.reason` and shown in the
+Activity log and the Sunday's audit. Staff see a locked notice. Turn the rule OFF to let staff mark any Sunday.
+
+**Networks form automatically.** Rule: if the leader of Lifegroup B is a current member of Lifegroup A (led by P), then
+B belongs to *P's network* (created on the fly, `networks.is_auto = 1`, named "P Network"). Networks follow membership
+changes; an auto network with nothing under it goes inactive (history kept) and is revived when needed. There is no
+"New Network" button any more. To override, edit a Lifegroup and pick a network by hand (`lifegroups.network_manual = 1`);
+"Auto" puts it back under the rule. Boys/girls separation still applies.
+
+**Lifegroup progress.**
+- Every current member has a tier: **Solid** or **New / other** (`lifegroup_memberships.tier`). It is set by hand by the
+  leader (report link) or staff — never automatically. A Lifegroup is **solid** once it has `lifegroup_solid_target`
+  (default 6) solid members.
+- Leaders report weekly without logging in through a **private link/QR** (`/lifegroup?t=TOKEN`, from the group's Progress
+  card → *Leader link & QR*). They tick who was present, add newcomers (registered in People as First Timer, status
+  "New / other", `people.added_via = 'lifegroup_link'`), mark Solid, or report "no Lifegroup this week" with a reason.
+  "New link" invalidates the previous token. The link exposes only the group's member names — no contact details.
+- Tables: `lifegroup_meetings` (one per group per date, `held`, `no_meeting_reason`, `present_count`, `submitted_via`)
+  and `lifegroup_meeting_attendance`. Both are included in backups.
+- Views: Lifegroups → **Progress** tab (overall, boys vs girls, per network, every group with an 8-week grid), each
+  Network page (**Weekly Lifegroups** grid: the network leader's own group first, then each group under it), each
+  Lifegroup page (**Progress** card with tiers, 12-week strip, meeting reports, leader link).
+- API: `GET /api/lifegroups/progress/overview`, `GET /api/lifegroups/:id/progress`, `PUT /api/lifegroups/:id/members/:pid/tier`,
+  `POST/DELETE /api/lifegroups/:id/meetings(/:mid)`, `POST /api/lifegroups/:id/report-link/reset`, `GET /api/networks/:id/calendar`;
+  public (rate-limited): `GET /api/public/lifegroup/:token`, `POST …/report`, `PUT …/members/:pid/tier`.
+- Migration `010_progress_networks_lock.sql` runs automatically on first start (SQLite and Postgres).
+
+## Closed/open cell, devotion taps, network-leader view, network statistics (2026-10-09, update 2)
+
+Migration `011_devotion.sql` adds `present` / `devotion` columns to `lifegroup_meeting_attendance` (applies automatically on start, SQLite and Postgres).
+
+- **Member sections everywhere**: *Solid · closed cell* (committed, consistent) and *New · open cell* (newcomers). Same tier field as before — only the presentation changed. Boy/Girl columns were removed from group and network member lists because every Lifegroup and Network is single-sex.
+- **Leader link (`/lifegroup?t=…`) is tap-only**: date → "We met / No Lifegroup" → tap names present, tap *Devo* for devotion → Send. Newcomers via "+ New person this week". Topic/notes are gone from the leader form (staff still have them in *Report a meeting*).
+- **Network leaders** open the *same* link for their own group and get a second tab, *My leaders*: every Lifegroup in their network, this week's status, and each member's last 4 weeks (attended / absent / devotion) in Solid / New sections, with *Mark Solid* taps. API: `GET /api/public/lifegroup/:token` → `network` (null for non-network leaders); `PUT /api/public/lifegroup/:token/groups/:gid/members/:pid/tier` (403 outside the leader's network).
+- **Reports → Lifegroups** now opens with **Network status**: Lifegroups, members, solid, solid %, solid groups, met this week, held (4 weeks), average LG attendance, devotion %, members present last Sunday. `GET /api/reports/network-status`, CSV `GET /api/reports/export/network-status.csv`. The Lifegroups CSV has `solid_members / new_members / solid_pct` instead of per-group boys/girls.
+- `GET /api/networks/:id/calendar?members=1` adds `members_last4` (per group → per person).
+- Removed duplicates: per-group boys/girls ratios, the "Boys & girls" card on the Network page, Boys-vs-girls / By-network tables on the Progress tab (now in Reports), the always-identical "Source" column in Registrations.
+- Demo seed for load testing: `node scripts/seed-large-demo.js` (1,000 people, 14 Sundays, 86 groups, 6 auto networks, 38 registrations) — refuses to run if demo data exists; *Settings → Remove demo data* deletes everything it created.
+
+## 2026-10-10 update 3 — Closed cell / Open cell, auto-placement, no more Area
+
+What changed (upload the whole update zip again, then Vercel redeploys automatically):
+
+- **Terminology:** "Solid" → **Closed cell** (matagal na, committed, consistent); "New" → **Open cell** (mga bago). One field (`tier`), same database — no migration needed.
+- **Members everywhere** (Lifegroup detail, Network detail, leader QR page): two side-by-side sections — **Open cell on the LEFT, Closed cell on the RIGHT** (stacked on phones). Names are clickable. Buttons: *Closed →* / *← Open*.
+- **Auto-placement on Approve:** when a QR registration is approved, the person is put under the Lifegroup of the leader they typed (case-insensitive name match; if two leaders share a name, the network leader's name decides; if still unsure → stays in *Needs Lifegroup*). Added as **Open cell**; boy/girl is inferred from the group when missing. Toast tells the admin where they were placed. Activity log: `lifegroup.assign … automatically`.
+- **Registrations:** default tab is *Pending* (approved rows leave the main view); Approved tab shows the person link, who approved, and the **Lifegroup** column (or *Needs Lifegroup*). Email folded under the name so the table fits the screen.
+- **Leader QR page** (`/lifegroup?t=…`): tabs **My members** (default) · **Weekly report** · **My leaders** (network leaders only). Leaders move members between Open/Closed cell (saves instantly), tap **Not active** to end a membership (history kept), and **Bring back** former members. New public routes: `PUT /api/public/lifegroup/:token/members/:pid/inactive` and `…/restore` (409 if the person is now in another group).
+- **Lifegroups list:** split into **Boys Lifegroups** and **Girls Lifegroups** tables; Area column + "All areas" filter removed; columns now Group · Leader · Network · Schedule · Members · Closed cell · Open cell · Last held. KPI tiles (Lifegroups page and Dashboard) now include **Closed cell** and **Open cell** totals and every tile is clickable.
+- **Area removed everywhere** (one church only): group form, list, detail, Find a Lifegroup, network tree, CSV (`area` column dropped), recommendations. Person form: "Lifegroup preferences" section and the boy/girl help text removed. DB columns stay (harmless).
+- **Reports → Lifegroups / Network status:** columns renamed Closed cell · Open cell · Closed %. CSV headers: `closed_cell, open_cell, closed_pct`.
+- QR per Lifegroup is **permanent and unique** (unchanged); the Leader link dialog now says so.
+- Tests: 77/77 on SQLite and Postgres.

@@ -70,9 +70,11 @@ function members(db, groupId) {
   return db.prepare(`
     SELECT p.id, p.person_code, p.first_name, p.last_name, p.sex, p.status, m.id AS membership_id, m.role, m.tier, m.joined_at,
            (SELECT COUNT(*) FROM lifegroup_meeting_attendance a JOIN lifegroup_meetings mt ON mt.id = a.meeting_id
-             WHERE a.person_id = p.id AND mt.lifegroup_id = m.lifegroup_id) AS meetings_attended,
+             WHERE a.person_id = p.id AND mt.lifegroup_id = m.lifegroup_id AND a.present = 1) AS meetings_attended,
+           (SELECT COUNT(*) FROM lifegroup_meeting_attendance a JOIN lifegroup_meetings mt ON mt.id = a.meeting_id
+             WHERE a.person_id = p.id AND mt.lifegroup_id = m.lifegroup_id AND a.devotion = 1) AS devotions,
            (SELECT MAX(mt.meeting_date) FROM lifegroup_meeting_attendance a JOIN lifegroup_meetings mt ON mt.id = a.meeting_id
-             WHERE a.person_id = p.id AND mt.lifegroup_id = m.lifegroup_id) AS last_meeting_attended
+             WHERE a.person_id = p.id AND mt.lifegroup_id = m.lifegroup_id AND a.present = 1) AS last_meeting_attended
       FROM lifegroup_memberships m JOIN people p ON p.id = m.person_id
      WHERE m.lifegroup_id = ? AND m.left_at IS NULL AND p.archived_at IS NULL
      ORDER BY m.role = 'member', m.tier = 'new', p.last_name COLLATE NOCASE, p.first_name COLLATE NOCASE`).all(groupId);
@@ -81,11 +83,15 @@ function members(db, groupId) {
 function meetingsOf(db, groupId, limit = 60) {
   const rows = db.prepare(`SELECT mt.*, u.display_name AS submitted_by_user_name FROM lifegroup_meetings mt LEFT JOIN users u ON u.id = mt.submitted_by_user
       WHERE mt.lifegroup_id = ? ORDER BY mt.meeting_date DESC LIMIT ?`).all(groupId, limit);
-  const att = db.prepare(`SELECT a.meeting_id, p.id, p.first_name, p.last_name FROM lifegroup_meeting_attendance a JOIN people p ON p.id = a.person_id
+  const att = db.prepare(`SELECT a.meeting_id, a.present, a.devotion, p.id, p.first_name, p.last_name FROM lifegroup_meeting_attendance a JOIN people p ON p.id = a.person_id
       WHERE a.meeting_id IN (SELECT id FROM lifegroup_meetings WHERE lifegroup_id = ?) ORDER BY p.last_name, p.first_name`).all(groupId);
-  const by = new Map();
-  for (const a of att) { if (!by.has(a.meeting_id)) by.set(a.meeting_id, []); by.get(a.meeting_id).push({ id: a.id, name: `${a.first_name} ${a.last_name}` }); }
-  return rows.map((m) => ({ ...m, present: by.get(m.id) || [] }));
+  const by = new Map(), dev = new Map();
+  for (const a of att) {
+    const who = { id: a.id, name: `${a.first_name} ${a.last_name}` };
+    if (Number(a.present)) { if (!by.has(a.meeting_id)) by.set(a.meeting_id, []); by.get(a.meeting_id).push(who); }
+    if (Number(a.devotion)) { if (!dev.has(a.meeting_id)) dev.set(a.meeting_id, []); dev.get(a.meeting_id).push(who); }
+  }
+  return rows.map((m) => ({ ...m, present: by.get(m.id) || [], devotion: dev.get(m.id) || [] }));
 }
 
 /** Week-by-week calendar for one group (oldest → newest). */
@@ -98,13 +104,56 @@ function calendar(db, groupId, weeks, s = settings(db)) {
   return keys.map((k) => { const m = byWeek.get(k); return { week_start: k, week_end: addDays(k, 6), meeting: m ? { id: m.id, date: m.meeting_date, held: Boolean(m.held), present: m.present_count } : null }; });
 }
 
+/**
+ * Per-member week-by-week detail for the last `n` weeks: did they attend the Lifegroup, did they have devotion.
+ * Returns Map personId → { weeks: [{ week_start, held, present, devotion }], attended, possible, consistency_pct }.
+ */
+function memberWeeks(db, groupId, n, s = settings(db)) {
+  const keys = recentWeeks(db, n, s);
+  const first = keys[0];
+  const meetings = db.prepare('SELECT id, meeting_date, held FROM lifegroup_meetings WHERE lifegroup_id = ? AND meeting_date >= ? ORDER BY meeting_date').all(groupId, first);
+  const weekOf = new Map(); // meeting id → week key
+  const weekInfo = new Map(); // week key → { reported, held }
+  for (const m of meetings) {
+    const k = mondayOf(m.meeting_date); weekOf.set(m.id, k);
+    const w = weekInfo.get(k) || { reported: true, held: false }; if (Number(m.held)) w.held = true; weekInfo.set(k, w);
+  }
+  const ids = meetings.map((m) => m.id);
+  const marks = new Map(); // `${week}:${person}` → { present, devotion } (merged over all meetings that week)
+  if (ids.length) for (const r of db.prepare(`SELECT meeting_id, person_id, present, devotion FROM lifegroup_meeting_attendance WHERE meeting_id IN (${ids.map(() => '?').join(',')})`).all(...ids)) {
+    const key = `${weekOf.get(r.meeting_id)}:${r.person_id}`;
+    const cur = marks.get(key) || { present: false, devotion: false };
+    if (Number(r.present)) cur.present = true; if (Number(r.devotion)) cur.devotion = true;
+    marks.set(key, cur);
+  }
+  const out = new Map();
+  const forPerson = (pid) => {
+    if (out.has(pid)) return out.get(pid);
+    let attended = 0, possible = 0, devotions = 0;
+    const wk = keys.map((k) => {
+      const info = weekInfo.get(k);
+      const held = Boolean(info && info.held);
+      const r = marks.get(`${k}:${pid}`);
+      const present = Boolean(held && r && r.present);
+      const devotion = Boolean(r && r.devotion);
+      if (held) { possible += 1; if (present) attended += 1; }
+      if (devotion) devotions += 1;
+      return { week_start: k, reported: Boolean(info), held, present, devotion };
+    });
+    const v = { weeks: wk, attended, possible, devotions, consistency_pct: possible ? Math.round((attended / possible) * 100) : null };
+    out.set(pid, v); return v;
+  };
+  return { forPerson, weeks: keys };
+}
+
 function progress(db, groupId, { weeks = 12 } = {}) {
   const s = settings(db);
   const g = db.prepare(`SELECT g.id, g.name, g.gender, g.is_active, g.schedule_day, g.schedule_time, g.leader_person_id, g.network_id,
         COALESCE(lp.first_name || ' ' || lp.last_name, g.leader_name) AS leader_name, n.name AS network_name
       FROM lifegroups g LEFT JOIN people lp ON lp.id = g.leader_person_id LEFT JOIN networks n ON n.id = g.network_id WHERE g.id = ?`).get(groupId);
   if (!g) throw new HttpError(404, 'Lifegroup not found.');
-  const mem = members(db, groupId);
+  const mw = memberWeeks(db, groupId, 4, s);
+  const mem = members(db, groupId).map((m) => ({ ...m, last4: mw.forPerson(m.id) }));
   const cal = calendar(db, groupId, weeks, s);
   const t = target(s);
   const solid = mem.filter((m) => m.tier === 'solid').length;
@@ -135,8 +184,37 @@ function setTier(db, groupId, personId, tier, { user = null, via = 'admin', byNa
   return true;
 }
 
+/** Leader (or staff) marks a member as no longer active in this group: membership ends today, history is kept. */
+function leaveMember(db, groupId, personId, { user = null, via = 'admin', byName = null } = {}) {
+  const m = db.prepare('SELECT m.id, g.name, p.first_name, p.last_name FROM lifegroup_memberships m JOIN lifegroups g ON g.id = m.lifegroup_id JOIN people p ON p.id = m.person_id WHERE m.lifegroup_id = ? AND m.person_id = ? AND m.left_at IS NULL').get(groupId, personId);
+  if (!m) throw new HttpError(404, 'That person is not a current member of this Lifegroup.');
+  const today = churchToday(db);
+  db.prepare("UPDATE lifegroup_memberships SET left_at = ?, notes = COALESCE(notes || ' · ', '') || ? WHERE id = ?").run(today, `Marked inactive${via === 'leader_link' ? ` by leader ${byName || ''} (report link)` : ''}`.trim(), m.id);
+  activity.log(db, user, 'lifegroup.leave', 'person', personId, `${m.first_name} ${m.last_name} marked inactive in ${m.name}${via === 'leader_link' ? ` by leader ${byName || ''} (report link)` : ''}`.trim());
+  syncNetworks(db, user);
+  return true;
+}
+/** Bring a former member back (only when they are not in another Lifegroup now). */
+function restoreMember(db, groupId, personId, { user = null, via = 'admin', byName = null } = {}) {
+  const prev = db.prepare('SELECT m.id, m.tier, g.name, p.first_name, p.last_name FROM lifegroup_memberships m JOIN lifegroups g ON g.id = m.lifegroup_id JOIN people p ON p.id = m.person_id WHERE m.lifegroup_id = ? AND m.person_id = ? AND m.left_at IS NOT NULL ORDER BY m.left_at DESC LIMIT 1').get(groupId, personId);
+  if (!prev) throw new HttpError(404, 'No former membership found.');
+  const cur = db.prepare('SELECT g.name FROM lifegroup_memberships m JOIN lifegroups g ON g.id = m.lifegroup_id WHERE m.person_id = ? AND m.left_at IS NULL').get(personId);
+  if (cur) throw new HttpError(409, `${prev.first_name} ${prev.last_name} is now in ${cur.name} — ask the admin to move them.`);
+  const today = churchToday(db);
+  db.prepare("INSERT INTO lifegroup_memberships (person_id, lifegroup_id, role, tier, joined_at, notes) VALUES (?, ?, 'member', ?, ?, ?)").run(personId, groupId, prev.tier || 'new', today, `Brought back${via === 'leader_link' ? ` by leader ${byName || ''} (report link)` : ''}`.trim());
+  activity.log(db, user, 'lifegroup.assign', 'person', personId, `${prev.first_name} ${prev.last_name} brought back to ${prev.name}${via === 'leader_link' ? ` by leader ${byName || ''} (report link)` : ''}`.trim());
+  syncNetworks(db, user);
+  return true;
+}
+function formerMembers(db, groupId, limit = 30) {
+  return db.prepare(`SELECT p.id, p.first_name, p.last_name, m.tier, m.left_at FROM lifegroup_memberships m JOIN people p ON p.id = m.person_id
+     WHERE m.lifegroup_id = ? AND m.left_at IS NOT NULL AND p.archived_at IS NULL
+       AND NOT EXISTS (SELECT 1 FROM lifegroup_memberships c WHERE c.person_id = p.id AND c.left_at IS NULL)
+     ORDER BY m.left_at DESC LIMIT ?`).all(groupId, limit);
+}
+
 /**
- * Upsert the report for one date. body: { meeting_date, held, no_meeting_reason?, topic?, notes?, present_ids: [], new_members: [{ full_name }] }
+ * Upsert the report for one date. body: { meeting_date, held, no_meeting_reason?, topic?, notes?, present_ids: [], devotion_ids: [], new_members: [{ full_name }] }
  * meta: { via: 'admin'|'leader_link', user?, byName? }
  */
 function recordMeeting(db, groupId, body, meta = {}) {
@@ -202,7 +280,10 @@ function recordMeeting(db, groupId, body, meta = {}) {
       meetingId = db.prepare(`INSERT INTO lifegroup_meetings (lifegroup_id, meeting_date, held, no_meeting_reason, topic, notes, present_count, submitted_via, submitted_by_user, submitted_by_name)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(groupId, date, held ? 1 : 0, held ? null : reason, topic, notes, held ? uniq.length : 0, by, meta.user ? meta.user.id : null, meta.byName || null).lastInsertRowid;
     }
-    if (held) { const ins = db.prepare('INSERT OR IGNORE INTO lifegroup_meeting_attendance (meeting_id, person_id) VALUES (?, ?)'); for (const pid of uniq) ins.run(meetingId, pid); }
+    const devo = [...new Set((Array.isArray(b.devotion_ids) ? b.devotion_ids : []).map(Number).filter((x) => Number.isInteger(x) && x > 0 && current.has(x)))];
+    const ins = db.prepare('INSERT INTO lifegroup_meeting_attendance (meeting_id, person_id, present, devotion) VALUES (?, ?, ?, ?)');
+    const presentSet = new Set(held ? uniq : []);
+    for (const pid of new Set([...presentSet, ...devo])) ins.run(meetingId, pid, presentSet.has(pid) ? 1 : 0, devo.includes(pid) ? 1 : 0);
     activity.log(db, meta.user || null, existing ? 'lifegroup.meeting_update' : 'lifegroup.meeting', 'lifegroup', groupId,
       `${g.name}: ${held ? `Lifegroup held on ${date} — ${uniq.length} present${added.length ? `, ${added.length} new` : ''}` : `no Lifegroup on ${date} (${reason})`}${by === 'leader_link' ? ` · reported by ${meta.byName || 'leader'} via link` : ''}`);
     return { meeting_id: meetingId, updated: Boolean(existing), present: uniq.length, added: added.length };
@@ -241,7 +322,7 @@ function attachCalendars(db, rows, weeks, s) {
 }
 
 /** Rows = the network leader's own group (if any) + every group in the network, each with a weekly calendar. */
-function networkCalendar(db, networkId, { weeks = 8 } = {}) {
+function networkCalendar(db, networkId, { weeks = 8, withMembers = false } = {}) {
   const s = settings(db);
   const n = db.prepare(`SELECT n.id, n.name, n.gender, n.leader_person_id, COALESCE(lp.first_name || ' ' || lp.last_name, n.leader_name) AS leader_name
       FROM networks n LEFT JOIN people lp ON lp.id = n.leader_person_id WHERE n.id = ?`).get(networkId);
@@ -249,7 +330,35 @@ function networkCalendar(db, networkId, { weeks = 8 } = {}) {
   const own = n.leader_person_id ? groupRows(db, 'AND g.leader_person_id = ?', [n.leader_person_id]) : [];
   const inNet = groupRows(db, 'AND g.network_id = ?', [n.id]).filter((g) => !own.some((o) => o.id === g.id));
   const rows = attachCalendars(db, [...own.map((g) => ({ ...g, is_leader_group: true })), ...inNet], weeks, s);
-  return { network: n, weeks: recentWeeks(db, weeks, s), target: target(s), groups: rows, summary: summarize(rows) };
+  const out = { network: n, weeks: recentWeeks(db, weeks, s), target: target(s), groups: rows, summary: summarize(rows) };
+  if (withMembers) {
+    out.members_last4 = {};
+    for (const g of rows) { const mw = memberWeeks(db, g.id, 4, s); out.members_last4[g.id] = {}; for (const m of members(db, g.id)) out.members_last4[g.id][m.id] = mw.forPerson(m.id); }
+  }
+  return out;
+}
+
+/**
+ * What a network leader sees on their own report link: every Lifegroup in the network(s) they lead,
+ * each with this week's status and the members (solid / other) with the last 4 weeks of LG attendance + devotion.
+ */
+function leaderNetworkView(db, leaderPersonId, { weeks = 4 } = {}) {
+  if (!leaderPersonId) return null;
+  const s = settings(db);
+  const nets = db.prepare('SELECT id, name, gender FROM networks WHERE leader_person_id = ? AND is_active = 1 ORDER BY name').all(leaderPersonId);
+  if (!nets.length) return null;
+  const ids = nets.map((n) => n.id);
+  const rows = attachCalendars(db, groupRows(db, `AND g.network_id IN (${ids.map(() => '?').join(',')}) AND (g.leader_person_id IS NULL OR g.leader_person_id <> ?)`, [...ids, leaderPersonId]), weeks, s);
+  const groups = rows.map((g) => {
+    const mw = memberWeeks(db, g.id, weeks, s);
+    const mem = members(db, g.id).map((m) => ({ id: m.id, name: `${m.first_name} ${m.last_name}`, tier: m.tier, role: m.role, meetings_attended: m.meetings_attended, last4: mw.forPerson(m.id) }));
+    const w = g.calendar[g.calendar.length - 1];
+    return { id: g.id, name: g.name, leader_name: g.leader_name, leader_person_id: g.leader_person_id, schedule_day: g.schedule_day, schedule_time: g.schedule_time,
+      solid: g.solid, total: g.total, target: g.target, is_solid: g.is_solid, held_last_4: g.held_last_4, met_this_week: g.met_this_week,
+      this_week: !w || !w.meeting ? 'none' : w.meeting.held ? 'held' : 'skip', last_meeting: w && w.meeting ? w.meeting : null, calendar: g.calendar,
+      solid_members: mem.filter((m) => m.tier === 'solid'), other_members: mem.filter((m) => m.tier !== 'solid') };
+  });
+  return { networks: nets, weeks: recentWeeks(db, weeks, s), groups, summary: summarize(rows) };
 }
 
 function summarize(rows) {
@@ -262,6 +371,67 @@ function summarize(rows) {
   }
   out.consistency_pct = out.possible_last_4 ? Math.round((out.held_last_4 / out.possible_last_4) * 100) : 0;
   return out;
+}
+
+/**
+ * Network statistics for Reports: one row per network (+ groups without a network) with ratios:
+ * solid %, solid groups, held this week, consistency (4 weeks), average Lifegroup attendance, last-Sunday attendance of members.
+ */
+function networkStatus(db) {
+  const s = settings(db);
+  const t = target(s);
+  const rows = attachCalendars(db, groupRows(db), 4, s);
+  const lastSunday = db.prepare('SELECT id, service_date FROM services ORDER BY service_date DESC LIMIT 1').get() || null;
+  const weeks4 = recentWeeks(db, 4, s)[0];
+  const netOf = new Map();
+  for (const g of rows) {
+    const k = g.network_id || 0;
+    if (!netOf.has(k)) netOf.set(k, { id: g.network_id, name: g.network_name || 'No network yet', gender: g.gender, groups: [] });
+    netOf.get(k).groups.push(g);
+  }
+  const leaderOf = new Map(db.prepare(`SELECT n.id, COALESCE(lp.first_name || ' ' || lp.last_name, n.leader_name) AS leader_name, n.gender FROM networks n LEFT JOIN people lp ON lp.id = n.leader_person_id`).all().map((r) => [r.id, r]));
+  const out = [...netOf.values()].map((n) => {
+    const ids = n.groups.map((g) => g.id);
+    const ph = ids.map(() => '?').join(',');
+    const sum = summarize(n.groups);
+    // average attendance at Lifegroups held in the last 4 weeks = present ÷ members at that time (approx. current members)
+    const att = ids.length ? db.prepare(`SELECT COUNT(*) AS meetings, COALESCE(SUM(present_count), 0) AS present FROM lifegroup_meetings WHERE held = 1 AND meeting_date >= ? AND lifegroup_id IN (${ph})`).get(weeks4, ...ids) : { meetings: 0, present: 0 };
+    const avgPresent = Number(att.meetings) ? Number(att.present) / Number(att.meetings) : null;
+    const avgGroupSize = n.groups.length ? sum.total_members / n.groups.length : 0;
+    const devo = ids.length ? db.prepare(`SELECT COUNT(DISTINCT a.person_id) AS n FROM lifegroup_meeting_attendance a JOIN lifegroup_meetings mt ON mt.id = a.meeting_id WHERE a.devotion = 1 AND mt.meeting_date >= ? AND mt.lifegroup_id IN (${ph})`).get(weeks4, ...ids).n : 0;
+    let sunday = null;
+    if (lastSunday && ids.length) {
+      const r = db.prepare(`SELECT COUNT(DISTINCT m.person_id) AS members,
+          COUNT(DISTINCT CASE WHEN ar.status = 'present' THEN m.person_id END) AS present
+        FROM lifegroup_memberships m JOIN people p ON p.id = m.person_id
+        LEFT JOIN attendance_records ar ON ar.person_id = m.person_id AND ar.service_id = ?
+       WHERE m.left_at IS NULL AND p.archived_at IS NULL AND m.lifegroup_id IN (${ph})`).get(lastSunday.id, ...ids);
+      sunday = { date: lastSunday.service_date, members: Number(r.members), present: Number(r.present), pct: Number(r.members) ? Math.round((Number(r.present) / Number(r.members)) * 100) : null };
+    }
+    const info = n.id ? leaderOf.get(n.id) : null;
+    const leaders = new Set(n.groups.map((g) => g.leader_person_id || g.leader_name).filter(Boolean)).size;
+    return {
+      id: n.id, name: n.name, gender: n.gender, leader_name: info ? info.leader_name : null,
+      groups: sum.groups, leaders, members: sum.total_members, solid_members: sum.solid_members, new_members: sum.new_members,
+      solid_pct: sum.total_members ? Math.round((sum.solid_members / sum.total_members) * 100) : null,
+      solid_groups: sum.solid_groups, solid_groups_pct: sum.groups ? Math.round((sum.solid_groups / sum.groups) * 100) : null,
+      met_this_week: sum.met_this_week, reported_this_week: sum.reported_this_week, consistency_pct: sum.consistency_pct,
+      avg_present: avgPresent == null ? null : Math.round(avgPresent * 10) / 10,
+      avg_attendance_pct: avgPresent != null && avgGroupSize ? Math.min(100, Math.round((avgPresent / avgGroupSize) * 100)) : null,
+      devotion_members: Number(devo), devotion_pct: sum.total_members ? Math.round((Number(devo) / sum.total_members) * 100) : null,
+      sunday,
+    };
+  }).sort((a, b) => (a.id ? 0 : 1) - (b.id ? 0 : 1) || String(a.gender).localeCompare(String(b.gender)) || a.name.localeCompare(b.name));
+  const total = (key) => out.reduce((acc, r) => acc + (r[key] || 0), 0);
+  const members = total('members'), groups = total('groups'), solid = total('solid_members'), solidGroups = total('solid_groups');
+  const sunMembers = out.reduce((a, r) => a + (r.sunday ? r.sunday.members : 0), 0), sunPresent = out.reduce((a, r) => a + (r.sunday ? r.sunday.present : 0), 0);
+  const all = summarize(rows);
+  return { target: t, last_sunday: lastSunday ? lastSunday.service_date : null, networks: out,
+    totals: { networks: out.filter((n) => n.id).length, groups, members, solid_members: solid, new_members: members - solid, solid_pct: members ? Math.round((solid / members) * 100) : null,
+      solid_groups: solidGroups, solid_groups_pct: groups ? Math.round((solidGroups / groups) * 100) : null, met_this_week: all.met_this_week, consistency_pct: all.consistency_pct,
+      devotion_members: total('devotion_members'), devotion_pct: members ? Math.round((total('devotion_members') / members) * 100) : null,
+      sunday_pct: sunMembers ? Math.round((sunPresent / sunMembers) * 100) : null },
+    by_gender: { boys: summarize(rows.filter((g) => g.gender === 'boys')), girls: summarize(rows.filter((g) => g.gender === 'girls')) } };
 }
 
 /** Everything the Progress tab needs: overall numbers, per-network and per-group tables. */
@@ -282,4 +452,4 @@ function overview(db, { weeks = 8 } = {}) {
     networks, groups: rows, boys: summarize(rows.filter((g) => g.gender === 'boys')), girls: summarize(rows.filter((g) => g.gender === 'girls')) };
 }
 
-module.exports = { settings, target, recentWeeks, mondayOf, addDays, churchToday, ensureToken, resetToken, groupByToken, members, meetingsOf, calendar, progress, setTier, recordMeeting, deleteMeeting, networkCalendar, overview, summarize };
+module.exports = { settings, target, recentWeeks, mondayOf, addDays, churchToday, ensureToken, resetToken, groupByToken, members, memberWeeks, meetingsOf, calendar, progress, setTier, leaveMember, restoreMember, formerMembers, recordMeeting, deleteMeeting, networkCalendar, leaderNetworkView, networkStatus, overview, summarize };
