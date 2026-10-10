@@ -11,7 +11,7 @@ const { normalizeEmail, isValidEmail, normalizeName, isSqliteUnique } = require(
 
 const router = express.Router();
 
-const STATUSES = ['first_timer', 'new_believer', 'regular', 'member', 'leader', 'volunteer', 'inactive'];
+const STATUSES = ['first_timer', 'regular', 'member', 'leader', 'inactive'];
 const PRIVATE_FIELDS = ['birthdate', 'contact_number', 'email', 'email_normalized', 'address', 'notes'];
 const MAX_PHOTO_CHARS = 400 * 1024; // ~300 KB image as data URL
 

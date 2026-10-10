@@ -994,3 +994,15 @@ details[open] > summary .t-open { display: none; } details:not([open]) > summary
   .mlist__who { flex: 1 1 100%; }
   .mlist__row .m4 { margin-right: auto; }
 }
+.handles { margin-top: 3px; } .handles .ok { color: var(--green-700, #15803d); } .handles .bad { color: #b91c1c; }
+/* network leader: cell leader list */
+.cl { border-top: 1px solid var(--border); }
+.cl__sum { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 16px; cursor: pointer; list-style: none; }
+.cl__sum::-webkit-details-marker { display: none; }
+.cl__sum::before { content: ''; width: 7px; height: 7px; border-right: 1.5px solid var(--muted); border-bottom: 1.5px solid var(--muted); transform: rotate(-45deg); margin-right: 4px; flex: none; transition: transform .15s; }
+.cl[open] > .cl__sum::before { transform: rotate(45deg); }
+.cl__name { flex: 1; font-weight: 600; }
+.cl[open] { background: var(--ink-50); }
+.cl .cells .cell { background: #fff; }
+.cl__held { flex: none; font-size: .68rem; }
+.cl__recent { margin: 4px 0 8px; padding-left: 18px; font-size: .82rem; line-height: 1.55; color: var(--ink-700, #374151); }

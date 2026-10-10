@@ -216,6 +216,7 @@ function autoPlace(db, pid, reg, user) {
   const want = pick.gender === 'boys' ? 'male' : pick.gender === 'girls' ? 'female' : null;
   if (person.sex && want && person.sex !== want) return null; // never put a girl in a boys group or vice versa
   if (!person.sex && want) db.prepare("UPDATE people SET sex = ?, updated_at = datetime('now') WHERE id = ?").run(want, pid); // the group tells us
+  try { require('./lifegroup-progress').assertRoom(db, pick.id, pick.name); } catch { return null; } // full → admin places by hand
   const today = new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);
   db.prepare("INSERT INTO lifegroup_memberships (person_id, lifegroup_id, role, tier, joined_at, assigned_by, notes) VALUES (?, ?, 'member', 'new', ?, ?, ?)")
     .run(pid, pick.id, today, user ? user.id : null, `Placed automatically from QR registration ${reg.ref_code} (leader: ${reg.leader_name})`);

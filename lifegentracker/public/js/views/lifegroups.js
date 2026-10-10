@@ -14,7 +14,7 @@ import {
  */
 
 const esc = (t) => String(t ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const slotsText = (g) => (g.capacity == null ? 'Open' : g.slots > 0 ? `${g.slots} slot${g.slots === 1 ? '' : 's'}` : 'Full');
+const slotsText = (g) => ((g.max_members ?? g.capacity) == null ? 'Open' : g.slots > 0 ? `${g.slots} slot${g.slots === 1 ? '' : 's'}` : 'Full');
 /** Boys / girls ratio bar — exported so Reports can reuse it. */
 export function ratioBar(boys, girls, total, { compact = false } = {}) {
   total = total ?? boys + girls;
@@ -276,7 +276,7 @@ async function drawGroups(body, filters) {
         <td data-label="Leader" class="nowrap">${g.leader_name || raw('<span class="muted">—</span>')}</td>
         <td data-label="Network" class="small nowrap">${g.network ? html`${g.network}${g.network_leader_name ? html`<div class="muted">${g.network_leader_name}</div>` : ''}` : raw('<span class="muted">—</span>')}</td>
         <td data-label="Schedule" class="nowrap">${fmtSchedule(g) || raw('<span class="muted">—</span>')}</td>
-        <td data-label="Members" class="num">${g.member_count}${g.capacity != null ? html`<span class="muted"> / ${g.capacity}</span>` : ''}</td>
+        <td data-label="Members" class="num">${g.member_count}${g.max_members != null ? html`<span class="muted"> / ${g.max_members}</span>` : ''}</td>
         <td data-label="Closed cell" class="num nowrap">${closed >= t ? raw(`<span class="badge badge--present badge--nodot" title="Solid Lifegroup">${closed}</span>`) : html`${closed}<span class="muted small">/${t}</span>`}</td>
         <td data-label="Open cell" class="num">${open}</td>
         <td data-label="Last held" class="nowrap small">${g.last_held ? fmtDate(g.last_held, { short: true }) : raw('<span class="muted">—</span>')}</td>
@@ -342,7 +342,7 @@ export async function renderLifegroup({ main }, id) {
     </div>
 
     <div class="grid grid--stats mb-2" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr))">
-      <div class="card stat"><span class="stat__label">Members</span><span class="stat__value">${g.member_count}${g.capacity != null ? html`<small> / ${g.capacity}</small>` : ''}</span></div>
+      <div class="card stat"><span class="stat__label">Members</span><span class="stat__value">${g.member_count}${g.max_members != null ? html`<small> / ${g.max_members}</small>` : ''}</span>${g.leads_network ? html`<span class="small muted">Network leader — max ${g.max_members} leaders</span>` : ''}</div>
       <div class="card stat"><span class="stat__label">Slots</span><span class="stat__value" style="font-size:1.15rem">${slotsText(g)}</span></div>
       <div class="card stat"><span class="stat__label">Schedule</span><span class="stat__value" style="font-size:1.15rem">${fmtSchedule(g) || '—'}</span></div>
     </div>
@@ -618,7 +618,7 @@ export async function renderNetwork({ main }, id) {
           </details>`)}</div>` : html`<div class="tree__children"><div class="tree__node small muted">No Lifegroups in this Network yet.${manage ? ' Edit a Lifegroup and choose this Network.' : ''}</div></div>`}
         </div>
       </div>
-      <div class="card__footer small muted">${dotsKey()} · Solid = closed cell · New = open cell · Statistics and CSV: <a href="#/reports?view=lifegroups">Reports → Lifegroups</a></div>
+      <div class="card__footer small muted">${dotsKey()} · Closed cell = matagal na, consistent · Open cell = mga bago · Statistics and CSV: <a href="#/reports?view=lifegroups">Reports → Lifegroups</a></div>
     </div>
 
     <div class="card mb-2" id="netCalendar"></div>

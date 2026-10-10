@@ -89,7 +89,7 @@ router.get('/lifegroup/:token', rateLimit('lg-get', 240), wrap((req, res) => {
     group: { id: g.id, name: g.name, gender: g.gender, leader_name: g.leader_display, schedule_day: g.schedule_day, schedule_time: g.schedule_time, venue: g.venue },
     church_name: s.church_name, today: prog.churchToday(db, s), target: p.target, solid: p.solid, new_members: p.new_members, total: p.total, is_solid: p.is_solid, percent: p.percent,
     streak: p.streak, held_last_4: p.held_last_4, met_this_week: p.met_this_week, last_meeting: p.last_meeting,
-    members: p.members.map(pubMember), calendar: p.calendar,
+    members: p.members.map(pubMember), calendar: p.calendar, max_members: p.max_members,
     recent: prog.meetingsOf(db, g.id, 6).map((m) => ({ id: m.id, meeting_date: m.meeting_date, held: Boolean(m.held), present_count: m.present_count, no_meeting_reason: m.no_meeting_reason, present: m.present.map((x) => x.name), present_ids: m.present.map((x) => x.id), devotion_ids: m.devotion.map((x) => x.id) })),
     former: prog.formerMembers(db, g.id).map((m) => ({ id: m.id, name: `${m.first_name} ${m.last_name}`, tier: m.tier, left_at: m.left_at })),
     network: prog.leaderNetworkView(db, g.leader_person_id, { weeks: 4 }),

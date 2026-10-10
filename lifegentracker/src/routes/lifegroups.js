@@ -26,7 +26,8 @@ const GROUP_SELECT = `
            WHERE m.lifegroup_id = g.id AND m.left_at IS NULL AND p.archived_at IS NULL) AS member_count,
          (SELECT COUNT(*) FROM lifegroup_memberships m JOIN people p ON p.id = m.person_id
            WHERE m.lifegroup_id = g.id AND m.left_at IS NULL AND p.archived_at IS NULL AND m.tier = 'solid') AS solid_count,
-         (SELECT MAX(mt.meeting_date) FROM lifegroup_meetings mt WHERE mt.lifegroup_id = g.id AND mt.held = 1) AS last_held
+         (SELECT MAX(mt.meeting_date) FROM lifegroup_meetings mt WHERE mt.lifegroup_id = g.id AND mt.held = 1) AS last_held,
+         EXISTS (SELECT 1 FROM networks xn WHERE xn.leader_person_id = g.leader_person_id AND xn.is_active = 1) AS leads_network
     FROM lifegroups g
     LEFT JOIN people lp ON lp.id = g.leader_person_id
     LEFT JOIN networks n ON n.id = g.network_id
@@ -47,8 +48,10 @@ function shape(g, user) {
     leader_name: g.leader_person_id ? `${g.leader_first_name} ${g.leader_last_name}` : g.leader_name,
     network: g.network_name || g.network, // display name (legacy free-text kept as fallback)
     time_bucket: timeBucket(g.schedule_time),
-    slots: g.capacity == null ? null : Math.max(g.capacity - g.member_count, 0),
+    leads_network: Boolean(Number(g.leads_network)),
+    max_members: Number(g.leads_network) ? (g.capacity != null ? Math.min(g.capacity, prog.NETWORK_LEADER_MAX) : prog.NETWORK_LEADER_MAX) : g.capacity,
   };
+  out.slots = out.max_members == null ? null : Math.max(out.max_members - g.member_count, 0);
   if (!can(user, 'people:view_private')) out.leader_contact = undefined;
   delete out.leader_first_name; delete out.leader_last_name;
   delete out.report_token; // private leader link — only via /:id/progress for managers
@@ -381,8 +384,7 @@ function assign(db, user, { personId, groupId, joinedAt, role, notes }) {
   if (role && !['member', 'leader', 'assistant'].includes(role)) throw new HttpError(400, 'Invalid role.');
   const cur = db.prepare('SELECT * FROM lifegroup_memberships WHERE person_id = ? AND left_at IS NULL').get(p.id);
   if (cur && cur.lifegroup_id === g.id) return { person: p, group: g, unchanged: true };
-  const count = db.prepare('SELECT COUNT(*) n FROM lifegroup_memberships m JOIN people x ON x.id = m.person_id WHERE m.lifegroup_id = ? AND m.left_at IS NULL AND x.archived_at IS NULL').get(g.id).n;
-  if (g.capacity != null && count >= g.capacity) throw new HttpError(409, `${g.name} is full (${g.capacity}). Choose another group or raise its capacity.`);
+  prog.assertRoom(db, g.id, g.name); // group capacity, and the 6-member rule for a network leader's own group
   db.transaction(() => {
     if (cur) db.prepare('UPDATE lifegroup_memberships SET left_at = ? WHERE id = ?').run(date, cur.id);
     db.prepare('INSERT INTO lifegroup_memberships (person_id, lifegroup_id, role, joined_at, notes, assigned_by) VALUES (?, ?, ?, ?, ?, ?)')

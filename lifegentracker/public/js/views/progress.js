@@ -248,7 +248,7 @@ export async function drawProgressTab(body) {
       <div class="kpi"><b>${s.consistency_pct}%</b><span>Held, last 4 weeks</span></div>
       <div class="kpi"><b>${s.networks}</b><span>Networks</span></div>
     </div>
-    <p class="small muted mb-2">A Lifegroup is <b>solid</b> once its closed cell has ${d.target} members. The leader moves members between open and closed cell on their QR page (or staff here). Members sit in the <b>open cell</b> (new) until the leader moves them to the <b>closed cell</b> (committed, consistent).</p>
+    <p class="small muted mb-2">A Lifegroup is <b>solid</b> once its closed cell has ${d.target} members (the closed cell holds at most ${d.target}). The leader moves members between open and closed cell on their QR page (or staff here). Members sit in the <b>open cell</b> (new) until the leader moves them to the <b>closed cell</b> (committed, consistent).</p>
     <p class="small muted mb-2">Per-network ratios (solid %, held, attendance, devotion) are in <a href="#/reports?view=lifegroups">Reports → Lifegroups</a>; open a <a href="#/lifegroups?tab=networks">Network</a> for its weekly grid.</p>
     <div class="card"><div class="card__header"><h2>Every Lifegroup</h2><div class="gsearch" style="max-width:260px">${icon('search', 15)}<input id="pgq" placeholder="Filter…" autocomplete="off" aria-label="Filter groups" /></div></div><div class="card__body card__body--flush" id="pgAll"></div></div>`;
   const all = body.querySelector('#pgAll');

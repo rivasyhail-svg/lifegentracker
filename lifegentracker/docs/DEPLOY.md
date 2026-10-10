@@ -227,3 +227,22 @@ What changed (upload the whole update zip again, then Vercel redeploys automatic
 - **Reports → Lifegroups / Network status:** columns renamed Closed cell · Open cell · Closed %. CSV headers: `closed_cell, open_cell, closed_pct`.
 - QR per Lifegroup is **permanent and unique** (unchanged); the Leader link dialog now says so.
 - Tests: 77/77 on SQLite and Postgres.
+
+### 2026-10-10 update 3b — status list trimmed
+Status choices are now **First Timer · Regular Attendee · Member · Leader · Inactive** (New Believer and Volunteer removed). Migration `012_status_cleanup.sql` runs automatically on first start and folds existing records in: New Believer → Regular Attendee, Volunteer → Member. Nothing is deleted.
+
+### 2026-10-10 update 3c — leader QR page format + network leader rule (max 6)
+- **Regular Lifegroup leader page is back to the original one-page format:** date → We met / No Lifegroup → tap names (+Devo) → Send report; below it the progress card with a collapsible **Members** list (Open cell / Closed cell buttons, *Not active*, *Bring back*). No tabs.
+- **Network leader page** (leader whose group members are themselves leaders): tabs **My members** · **Weekly report** · **My leaders**. *My members* shows the open/closed-cell columns and, under each member, **the Lifegroup they handle** (name · members · closed cell · met / not yet reported this week).
+- **Church rule enforced server-side:** a network leader's own Lifegroup holds **at most 6 members**. Admin *Add member*, the leader's "New person this week", *Bring back* and QR auto-placement all refuse the 7th with a clear message. Lifegroup list/detail show `n / 6` for those groups. Groups already above 6 keep their members (nothing is removed) but cannot add more.
+- Demo seed now creates 14 networks with ≤6 leaders each.
+- Tests: 78/78 on SQLite and Postgres.
+
+### 2026-10-10 update 3d — closed cell capped at 6
+The closed cell of every Lifegroup holds at most the solid target (6). Moving a 7th member to the closed cell is refused (409 "The closed cell is full (6)…") — they stay in the open cell. Matches the church diagram: network leader → 6 leaders → each with 6 closed-cell members + open cell. Demo seed respects it.
+
+### 2026-10-10 update 3e — network leader page: "My cell leaders"
+Network leader's QR page now has two tabs only: **My cell leaders** (names + their last-4-weeks presence in the network leader's Lifegroup; tap a name → that cell leader's own members in Open cell / Closed cell, movable there) and **Weekly report**. The network leader's own members are never sorted into open/closed cells — cells apply under each cell leader. Regular leaders keep the one-page format.
+
+### 2026-10-10 update 3f — cell leader tracking on the network leader page
+In **My cell leaders**, each name now shows a badge for *their* Lifegroup this week (**Held LG** / **No LG** / **No report**) next to the dots (present in the network leader's Lifegroup). Tapping the name shows "Their Lifegroup · n/4 held" (4-week strip) and **Who was present** — the last 4 reports with the names present or the no-meeting reason — above their Open / Closed cell. Public network view now includes `recent` per group (names only, no contact details).

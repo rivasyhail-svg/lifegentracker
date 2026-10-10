@@ -67,20 +67,19 @@ function lastSundays(n) {
     // ---- people ---------------------------------------------------------
     const people = [];
     const usedNames = new Set(), usedEmails = new Set();
-    // 6 network leaders + ~70 group leaders come first so they exist from the start
+    // 14 network leaders + 72 group leaders come first so they exist from the start
     for (let i = 0; i < N; i += 1) {
       const sex = i % 2 ? 'female' : 'male';
       let first, last, key;
       do { first = pick(sex === 'male' ? MALE : FEMALE); last = pick(LAST); key = normalizeName(`${first} ${last}`); } while (usedNames.has(key));
       usedNames.add(key);
-      const isNetLeader = i < 6, isLeader = i < 86;
+      const isNetLeader = i < 14, isLeader = i < 86; // 14 network leaders × max 6 leaders each covers the 72 sub-leaders
       const r = rand();
-      const status = isLeader ? 'leader' : r < 0.12 ? 'first_timer' : r < 0.22 ? 'new_believer' : r < 0.52 ? 'regular' : r < 0.80 ? 'member' : r < 0.90 ? 'volunteer' : 'inactive';
+      const status = isLeader ? 'leader' : r < 0.12 ? 'first_timer' : r < 0.52 ? 'regular' : r < 0.90 ? 'member' : 'inactive';
       // registration date: leaders & members early; first timers mostly in the last weeks
       let dayOff;
       if (isLeader) dayOff = -Math.floor(rand() * 30);
       else if (status === 'first_timer') dayOff = 60 + Math.floor(rand() * 42);
-      else if (status === 'new_believer') dayOff = 20 + Math.floor(rand() * 70);
       else dayOff = Math.floor(rand() * 84) - 20;
       let dateReg = addDays(start, dayOff); if (dateReg > today) dateReg = today;
       // most join on a Sunday
@@ -98,7 +97,7 @@ function lastSundays(n) {
         address: `${area}, San Jose del Monte, Bulacan`, school: pick(SCHOOLS) || null, course: chance(0.5) ? `${pick(['BSIT', 'BSBA', 'BSEd', 'BSN', 'STEM', 'HUMSS', 'ABM', 'BSA', 'BSCrim'])} ${1 + Math.floor(rand() * 4)}` : null,
         status, date_registered: dateReg, src: viaQr ? 'qr' : 'manual', reg_at: regAt, uid }).lastInsertRowid;
       // attendance propensity by status
-      const p = status === 'leader' ? 0.92 : status === 'member' ? 0.82 : status === 'volunteer' ? 0.85 : status === 'regular' ? 0.68 : status === 'new_believer' ? 0.6 : status === 'first_timer' ? 0.45 : 0.15;
+      const p = status === 'leader' ? 0.92 : status === 'member' ? 0.82 : status === 'regular' ? 0.68 : status === 'first_timer' ? 0.45 : 0.15;
       people.push({ id, sex, status, first, last, dateReg, area, p: p * (0.8 + rand() * 0.3), isNetLeader, isLeader, email });
     }
 
@@ -141,7 +140,9 @@ function lastSundays(n) {
     };
     // network leaders' own groups hold the sub-leaders (this is what forms the networks automatically)
     const subBySex = { male: subLeaders.filter((x) => x.sex === 'male'), female: subLeaders.filter((x) => x.sex === 'female') };
-    netLeaders.forEach((nl, i) => { const pool = subBySex[nl.sex]; const take = pool.splice(0, Math.ceil(pool.length / (3 - Math.floor(i / 2)))); mkGroup(nl, take); });
+    // church rule: a network leader handles at most 6 leaders
+    const remaining = { male: netLeaders.filter((x) => x.sex === 'male').length, female: netLeaders.filter((x) => x.sex === 'female').length };
+    netLeaders.forEach((nl) => { const pool = subBySex[nl.sex]; const take = pool.splice(0, Math.min(6, Math.ceil(pool.length / remaining[nl.sex]))); remaining[nl.sex] -= 1; mkGroup(nl, take); });
     // members for sub-leaders' groups
     const pool = { male: people.filter((x) => !x.isLeader && x.sex === 'male' && x.status !== 'inactive'), female: people.filter((x) => !x.isLeader && x.sex === 'female' && x.status !== 'inactive') };
     for (const k of ['male', 'female']) pool[k].sort(() => rand() - 0.5);
@@ -150,7 +151,7 @@ function lastSundays(n) {
 
     // tiers: longer-standing, consistent members become Solid
     const upTier = db.prepare("UPDATE lifegroup_memberships SET tier = 'solid' WHERE person_id = ? AND lifegroup_id = ? AND left_at IS NULL");
-    for (const g of groups) for (const m of g.members) if (m.joined <= addDays(sundays[0], 42) && m.p > 0.6 && chance(0.75)) upTier.run(m.id, g.id);
+    for (const g of groups) { let closed = 0; for (const m of g.members) if (closed < 6 && m.joined <= addDays(sundays[0], 42) && m.p > 0.6 && chance(0.75)) { upTier.run(m.id, g.id); closed += 1; } } // closed cell holds at most 6
 
     // ---- 12 weeks of leader reports ------------------------------------------------
     const insMeet = db.prepare(`INSERT OR IGNORE INTO lifegroup_meetings (lifegroup_id, meeting_date, held, no_meeting_reason, topic, notes, present_count, submitted_via, submitted_by_name, created_at)

@@ -25,7 +25,7 @@ const TIER = { solid: 'Closed cell', new: 'Open cell' };
 const HINT = { solid: 'matagal na · committed · consistent', new: 'mga bago · hindi pa consistent' };
 
 let d = null;
-let view = 'members'; // 'members' | 'report' | 'network'
+let view = null; // network leaders: 'leaders' | 'report'; regular leaders: always 'report' (one page)
 let draft = { date: null, held: true, present: new Set(), devotion: new Set(), newbies: [] };
 
 /** Four small cells: LG attended / devotion for each of the last 4 weeks. */
@@ -45,29 +45,42 @@ function memberRows(list, { tapTier, groupId, inactive = false } = {}) {
   </div>`).join('')}</div>`;
 }
 
-/** Members tab: open cell LEFT, closed cell RIGHT; tap to move, mark inactive, bring back. */
-function membersView() {
-  const solid = d.members.filter((m) => m.tier === 'solid'), others = d.members.filter((m) => m.tier !== 'solid');
-  const col = (tier, list) => `<section class="cell cell--${tier === 'solid' ? 'closed' : 'open'}">
-      <header class="cell__head"><b>${TIER[tier]}</b> <span class="muted">· ${list.length}</span><span class="small muted cell__hint">${HINT[tier]}</span></header>
-      <div style="padding:4px 12px 8px">${memberRows(list, { tapTier: true, inactive: true })}</div>
+/** Network leader: "My cell leaders" — just the names and whether they were present (their last 4 weeks in my
+ *  Lifegroup). Tap a name → that leader's own members appear in Open cell / Closed cell and can be moved there. */
+function cellLeadersView() {
+  const net = d.network;
+  const byLeader = new Map(net.groups.map((g) => [g.leader_person_id, g]));
+  const rows = d.members.map((m) => ({ id: m.id, name: m.name, last4: m.last4, group: byLeader.get(m.id) || null }));
+  for (const g of net.groups) if (!rows.some((r) => r.id === g.leader_person_id)) rows.push({ id: g.leader_person_id || `g${g.id}`, name: g.leader_name || g.name, last4: null, group: g });
+  const cell = (g, tier, list) => `<section class="cell cell--${tier === 'solid' ? 'closed' : 'open'}">
+      <header class="cell__head"><b>${TIER[tier]}</b> <span class="muted">· ${list.length}</span></header>
+      <div style="padding:2px 10px 6px">${memberRows(list, { tapTier: true, groupId: g.id })}</div>
     </section>`;
+  const heldBadge = (g) => !g ? '' : g.this_week === 'held' ? '<span class="badge badge--present badge--nodot cl__held">Held LG</span>' : g.this_week === 'skip' ? '<span class="badge badge--absent badge--nodot cl__held">No LG</span>' : '<span class="badge badge--nodot cl__held">No report</span>';
+  const strip = (g) => `<div class="wk wk--sm" aria-label="Their Lifegroup, last ${g.calendar.length} weeks">${g.calendar.map((w) => { const m = w.meeting; return `<span class="wk__c ${!m ? 'wk__c--none' : m.held ? 'wk__c--held' : 'wk__c--skip'}" title="Week of ${weekLabel(w.week_start)}: ${!m ? 'no report' : m.held ? m.present + ' present' : 'no Lifegroup'}">${m && m.held ? m.present : m ? '×' : ''}</span>`; }).join('')}</div>`;
+  const recent = (g) => g.recent && g.recent.length ? `<ul class="cl__recent">${g.recent.map((m) => `<li><b>${fmtDate(m.meeting_date)}</b> — ${m.held ? `${m.present_count} present${m.present.length ? `: ${esc(m.present.join(', '))}` : ''}` : `no Lifegroup${m.no_meeting_reason ? ` (${esc(m.no_meeting_reason)})` : ''}`}</li>`).join('')}</ul>` : '<div class="small muted">No report yet from this leader.</div>';
+  const item = (r) => `<details class="cl">
+      <summary class="cl__sum"><span class="cl__name">${esc(r.name)}</span>${heldBadge(r.group)}${r.last4 ? dots(r.last4) : '<span class="small muted">—</span>'}</summary>
+      ${r.group ? `<div style="padding:6px 12px 0">
+          <div class="small muted">${esc(r.group.name)} · ${r.group.total} member${r.group.total === 1 ? '' : 's'} · ${r.group.solid}/${r.group.target} closed cell</div>
+          <div class="row row--between mt-1" style="gap:8px;align-items:center"><span class="small"><b>Their Lifegroup</b> · ${r.group.held_last_4}/4 held</span>${strip(r.group)}</div>
+          <div class="small mt-1"><b>Who was present</b></div>${recent(r.group)}
+        </div>
+        <div class="cells" style="margin-top:8px;border-top:1px solid var(--border)">${cell(r.group, 'new', r.group.other_members)}${cell(r.group, 'solid', r.group.solid_members)}</div>`
+      : '<div class="small muted" style="padding:8px 12px 10px">No Lifegroup of their own yet.</div>'}
+    </details>`;
   return `
     <section class="card reg-card" style="padding:0;overflow:hidden">
-      <div class="row row--between" style="padding:14px 16px 10px"><b>${d.is_solid ? 'Solid Lifegroup 🎉' : 'Progress to a solid Lifegroup'}</b><span class="small muted">${d.solid}/${d.target} in the closed cell</span></div>
-      <div class="progress" style="margin:0 16px 12px"><span style="width:${d.percent}%"></span></div>
-      <p class="small muted" style="margin:0 16px 12px">Tap <b>Closed cell →</b> once a member is committed and consistent; <b>← Open cell</b> moves them back. Changes save instantly.</p>
-      <div class="cells" style="border-top:1px solid var(--border)">${col('new', others)}${col('solid', solid)}</div>
-      ${!d.members.length ? '<p class="small muted" style="padding:0 16px 14px">No members yet — send a report with “New person this week” to add your first members.</p>' : ''}
-    </section>
-    ${d.former && d.former.length ? `<details class="card reg-card mt-2"><summary class="small"><b>Not active anymore</b> · ${d.former.length}</summary>
-      <div class="mlist mt-1">${d.former.map((m) => `<div class="mlist__row"><div class="mlist__who"><b>${esc(m.name)}</b><div class="small muted">left ${fmtDate(m.left_at)} · was ${TIER[m.tier] || TIER.new}</div></div><button type="button" class="btn btn--sm btn--ghost" data-restore="${m.id}">Bring back</button></div>`).join('')}</div>
-    </details>` : ''}`;
+      <div class="row row--between" style="padding:14px 16px 10px"><b>My cell leaders</b><span class="small muted">${rows.length}${d.max_members ? ` / ${d.max_members}` : ''} · ${net.summary.met_this_week}/${net.summary.groups} met this week</span></div>
+      <p class="small muted" style="margin:0 16px 10px">Dots = present in <b>your</b> Lifegroup, last 4 weeks. Badge = did they hold <b>their</b> Lifegroup this week. Tap a name for who was present and their Open / Closed cell.</p>
+      ${rows.length ? rows.map(item).join('') : '<p class="small muted" style="padding:0 16px 14px">No cell leaders yet — add them with “New person this week” in your Weekly report.</p>'}
+    </section>`;
 }
 
 function render() {
   const g = d.group;
   const net = d.network;
+  if (!view) view = net ? 'leaders' : 'report';
   title.textContent = g.name;
   lead.textContent = `Hi ${g.leader_name || 'Leader'}!${g.schedule_day ? ` Your Lifegroup: ${DAY[g.schedule_day]}${g.schedule_time ? ' ' + g.schedule_time : ''}.` : ''}`;
   document.getElementById('lgChurch').textContent = d.church_name || '';
@@ -82,7 +95,8 @@ function render() {
       <button type="button" class="chip__devo ${draft.devotion.has(m.id) ? 'chip__devo--on' : ''}" data-devo="${m.id}" aria-pressed="${draft.devotion.has(m.id)}" title="Had devotion this week">Devo</button>
     </div>`;
 
-  const tabs = `<div class="filter-tabs" style="margin:0 0 14px"><button type="button" class="${view === 'members' ? 'active' : ''}" data-view="members">My members <span class="count">${d.members.length}</span></button><button type="button" class="${view === 'report' ? 'active' : ''}" data-view="report">Weekly report</button>${net ? `<button type="button" class="${view === 'network' ? 'active' : ''}" data-view="network">My leaders <span class="count">${net.groups.length}</span></button>` : ''}</div>`;
+  if (!net && view !== 'report') view = 'report';
+  const tabs = net ? `<div class="filter-tabs" style="margin:0 0 14px"><button type="button" class="${view === 'leaders' ? 'active' : ''}" data-view="leaders">My cell leaders <span class="count">${d.members.length}${d.max_members ? `/${d.max_members}` : ''}</span></button><button type="button" class="${view === 'report' ? 'active' : ''}" data-view="report">Weekly report</button></div>` : '';
 
   const reportView = `
     <form id="rep" class="card reg-card" novalidate>
@@ -112,32 +126,16 @@ function render() {
       <div class="progress mt-1"><span style="width:${d.percent}%"></span></div>
       <div class="wk wk--md mt-2" aria-label="Last 8 weeks">${d.calendar.map((w) => { const m = w.meeting; return `<span class="wk__c ${!m ? 'wk__c--none' : m.held ? 'wk__c--held' : 'wk__c--skip'}" title="Week of ${weekLabel(w.week_start)}">${m && m.held ? m.present : m ? '×' : ''}</span>`; }).join('')}</div>
       <div class="small muted mt-1">Last 8 weeks · ${d.held_last_4}/4 held recently · streak ${d.streak}</div>
-      <p class="small muted mt-2" style="margin-bottom:0">Move members between open and closed cell in <a href="#" data-view="members">My members</a>.</p>
+      ${net ? `<p class="small muted mt-2" style="margin-bottom:0">Your members are cell leaders — open their own members in <a href="#" data-view="leaders">My cell leaders</a>.</p>` : `<details class="mt-2"><summary class="small"><b>Members</b> · move between Open cell and Closed cell</summary>
+        <p class="small muted" style="margin:8px 0 4px">${TIER.new} = ${HINT.new}. ${TIER.solid} = ${HINT.solid} (max ${d.target} — ${d.target} = solid Lifegroup).</p>
+        <div class="chip-group__title mt-1">${TIER.new} <span class="muted">${others.length}</span></div>${memberRows(others, { tapTier: true, inactive: true })}
+        <div class="chip-group__title mt-1">${TIER.solid} <span class="muted">${solid.length}</span></div>${memberRows(solid, { tapTier: true, inactive: true })}
+        ${d.former && d.former.length ? `<div class="chip-group__title mt-1">Not active anymore <span class="muted">${d.former.length}</span></div><div class="mlist">${d.former.map((m) => `<div class="mlist__row"><div class="mlist__who"><b>${esc(m.name)}</b><div class="small muted">left ${fmtDate(m.left_at)}</div></div><button type="button" class="btn btn--sm btn--ghost" data-restore="${m.id}">Bring back</button></div>`).join('')}</div>` : ''}
+      </details>`}
       ${d.recent.length ? `<details class="mt-1"><summary class="small"><b>Recent reports</b></summary><ul class="small" style="margin:6px 0 0;padding-left:18px;line-height:1.7">${d.recent.map((m) => `<li><b>${fmtDate(m.meeting_date)}</b> — ${m.held ? `${m.present_count} present` : `no Lifegroup (${esc(m.no_meeting_reason || '')})`}</li>`).join('')}</ul></details>` : ''}
     </section>`;
 
-  const netView = net ? `
-    <section class="card reg-card">
-      <div class="row row--between"><b>${esc(net.networks.map((n) => n.name).join(', '))}</b><span class="small muted">${net.summary.groups} Lifegroups</span></div>
-      <div class="kpi-row mt-2" style="grid-template-columns:repeat(3,1fr)">
-        <div class="kpi ${net.summary.met_this_week < net.summary.groups ? 'kpi--amber' : ''}"><b>${net.summary.met_this_week}<small>/${net.summary.groups}</small></b><span>Met this week</span></div>
-        <div class="kpi"><b>${net.summary.solid_groups}<small>/${net.summary.groups}</small></b><span>Solid groups</span></div>
-        <div class="kpi"><b>${net.summary.consistency_pct}%</b><span>Held, 4 weeks</span></div>
-      </div>
-      <p class="small muted mt-2" style="margin-bottom:0">Each leader reports on their own link. Here you see how their members are doing — <span class="m4__c m4__c--on m4__c--key"></span> attended · <span class="m4__c m4__c--off m4__c--key"></span> absent · <span class="m4__c m4__c--none m4__c--key"></span> no Lifegroup · <span class="m4__c m4__c--on m4__c--devo m4__c--key"></span> with devotion.</p>
-    </section>
-    ${net.groups.map((g) => `<details class="card reg-card mt-2 netgrp" ${g.this_week !== 'held' ? 'open' : ''}>
-      <summary>
-        <div class="row row--between" style="gap:8px"><div><b>${esc(g.leader_name || g.name)}</b><div class="small muted">${esc(g.name)} · ${g.total} members · ${g.solid}/${g.target} closed cell</div></div>
-        <span class="badge badge--nodot ${g.this_week === 'held' ? 'badge--present' : g.this_week === 'skip' ? 'badge--absent' : ''}">${g.this_week === 'held' ? `Met · ${g.last_meeting.present}` : g.this_week === 'skip' ? 'No Lifegroup' : 'Not yet reported'}</span></div>
-        <div class="wk wk--sm mt-1">${g.calendar.map((w) => { const m = w.meeting; return `<span class="wk__c ${!m ? 'wk__c--none' : m.held ? 'wk__c--held' : 'wk__c--skip'}">${m && m.held ? m.present : m ? '×' : ''}</span>`; }).join('')}</div>
-      </summary>
-      <div class="chip-group__title mt-2">${TIER.new} <span class="muted">${g.other_members.length}</span></div>${memberRows(g.other_members, { tapTier: true, groupId: g.id })}
-      <div class="chip-group__title mt-1">${TIER.solid} <span class="muted">${g.solid_members.length}</span></div>${memberRows(g.solid_members, { tapTier: true, groupId: g.id })}
-    </details>`).join('')}
-    ${!net.groups.length ? '<section class="card reg-card mt-2"><p class="small muted" style="margin:0">No Lifegroups in your network yet. Once a leader in your Lifegroup starts their own group, it appears here.</p></section>' : ''}` : '';
-
-  body.innerHTML = tabs + (view === 'network' && net ? netView : view === 'members' ? membersView() : reportView);
+  body.innerHTML = tabs + (view === 'leaders' && net ? cellLeadersView() : reportView);
   body.querySelectorAll('[data-view]').forEach((b) => { b.onclick = (e) => { e.preventDefault(); view = b.dataset.view; render(); window.scrollTo(0, 0); }; });
   if (view !== 'report') { bindTier(); return; }
 

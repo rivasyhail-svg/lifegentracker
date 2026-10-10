@@ -19,6 +19,33 @@ function settings(db) {
   return out;
 }
 const target = (s) => Math.max(1, Number(s.lifegroup_solid_target) || 6);
+
+/**
+ * Church rule: a network leader's own Lifegroup holds at most 6 members (they are leaders themselves).
+ * Returns the cap for a group (6 when its leader currently leads an active network, else the group's own capacity or null).
+ */
+const NETWORK_LEADER_MAX = 6;
+function maxMembers(db, groupId) {
+  const g = db.prepare('SELECT capacity, leader_person_id FROM lifegroups WHERE id = ?').get(groupId);
+  if (!g) return null;
+  const isNetLeader = g.leader_person_id && db.prepare('SELECT 1 FROM networks WHERE leader_person_id = ? AND is_active = 1 LIMIT 1').get(g.leader_person_id);
+  if (isNetLeader) return g.capacity != null ? Math.min(g.capacity, NETWORK_LEADER_MAX) : NETWORK_LEADER_MAX;
+  return g.capacity != null ? g.capacity : null;
+}
+function currentCount(db, groupId) {
+  return db.prepare('SELECT COUNT(*) n FROM lifegroup_memberships m JOIN people x ON x.id = m.person_id WHERE m.lifegroup_id = ? AND m.left_at IS NULL AND x.archived_at IS NULL').get(groupId).n;
+}
+/** Throws 409 when one more member would exceed the cap. */
+function assertRoom(db, groupId, groupName) {
+  const cap = maxMembers(db, groupId);
+  if (cap == null) return;
+  const n = currentCount(db, groupId);
+  if (n >= cap) {
+    const g = db.prepare('SELECT leader_person_id, capacity FROM lifegroups WHERE id = ?').get(groupId);
+    const net = g.leader_person_id && db.prepare('SELECT 1 FROM networks WHERE leader_person_id = ? AND is_active = 1 LIMIT 1').get(g.leader_person_id);
+    throw new HttpError(409, net && (g.capacity == null || g.capacity > NETWORK_LEADER_MAX) ? `${groupName || 'This Lifegroup'} already has ${n} members — a network leader handles at most ${NETWORK_LEADER_MAX}.` : `${groupName || 'This Lifegroup'} is full (${cap}). Choose another group or raise its capacity.`);
+  }
+}
 const tz = (s) => s.qr_timezone || 'Asia/Manila';
 
 // ---------------------------------------------------------------------------
@@ -167,7 +194,7 @@ function progress(db, groupId, { weeks = 12 } = {}) {
     percent: Math.min(100, Math.round((solid / t) * 100)),
     held_last_4: held4, reported_last_4: reported4, streak, last_meeting: last,
     met_this_week: Boolean(cal[cal.length - 1].meeting && cal[cal.length - 1].meeting.held),
-    members: mem, calendar: cal,
+    members: mem, calendar: cal, max_members: maxMembers(db, groupId),
   };
 }
 
@@ -179,8 +206,14 @@ function setTier(db, groupId, personId, tier, { user = null, via = 'admin', byNa
   const m = db.prepare('SELECT m.id, m.tier, p.first_name, p.last_name FROM lifegroup_memberships m JOIN people p ON p.id = m.person_id WHERE m.lifegroup_id = ? AND m.person_id = ? AND m.left_at IS NULL').get(groupId, personId);
   if (!m) throw new HttpError(404, 'That person is not a current member of this Lifegroup.');
   if (m.tier === tier) return false;
+  if (tier === 'solid') {
+    // Church rule: the closed cell holds at most the target (6). The 7th stays in the open cell.
+    const t = target(settings(db));
+    const closed = db.prepare("SELECT COUNT(*) n FROM lifegroup_memberships m JOIN people p ON p.id = m.person_id WHERE m.lifegroup_id = ? AND m.left_at IS NULL AND p.archived_at IS NULL AND m.tier = 'solid'").get(groupId).n;
+    if (closed >= t) throw new HttpError(409, `The closed cell is full (${t}). ${m.first_name} stays in the open cell — move someone out first.`);
+  }
   db.prepare('UPDATE lifegroup_memberships SET tier = ? WHERE id = ?').run(tier, m.id);
-  activity.log(db, user, 'lifegroup.tier', 'person', personId, `${m.first_name} ${m.last_name} marked ${tier === 'solid' ? 'Solid' : 'New / other'}${via === 'leader_link' ? ` by leader ${byName || ''} (report link)` : ''}`.trim());
+  activity.log(db, user, 'lifegroup.tier', 'person', personId, `${m.first_name} ${m.last_name} moved to the ${tier === 'solid' ? 'closed' : 'open'} cell${via === 'leader_link' ? ` by leader ${byName || ''} (report link)` : ''}`.trim());
   return true;
 }
 
@@ -200,6 +233,7 @@ function restoreMember(db, groupId, personId, { user = null, via = 'admin', byNa
   if (!prev) throw new HttpError(404, 'No former membership found.');
   const cur = db.prepare('SELECT g.name FROM lifegroup_memberships m JOIN lifegroups g ON g.id = m.lifegroup_id WHERE m.person_id = ? AND m.left_at IS NULL').get(personId);
   if (cur) throw new HttpError(409, `${prev.first_name} ${prev.last_name} is now in ${cur.name} — ask the admin to move them.`);
+  assertRoom(db, groupId, prev.name);
   const today = churchToday(db);
   db.prepare("INSERT INTO lifegroup_memberships (person_id, lifegroup_id, role, tier, joined_at, notes) VALUES (?, ?, 'member', ?, ?, ?)").run(personId, groupId, prev.tier || 'new', today, `Brought back${via === 'leader_link' ? ` by leader ${byName || ''} (report link)` : ''}`.trim());
   activity.log(db, user, 'lifegroup.assign', 'person', personId, `${prev.first_name} ${prev.last_name} brought back to ${prev.name}${via === 'leader_link' ? ` by leader ${byName || ''} (report link)` : ''}`.trim());
@@ -253,8 +287,9 @@ function recordMeeting(db, groupId, body, meta = {}) {
         pid = dup.id; // already in People: just place them in this group (one current membership per person)
         const cur = db.prepare('SELECT lifegroup_id FROM lifegroup_memberships WHERE person_id = ? AND left_at IS NULL').get(pid);
         if (cur && cur.lifegroup_id !== groupId) throw new HttpError(409, `${dup.first_name} ${dup.last_name} is already in another Lifegroup — ask the admin to move them.`, { new_members: 'already in another group' });
-        if (!cur) db.prepare("INSERT INTO lifegroup_memberships (person_id, lifegroup_id, role, tier, joined_at, notes) VALUES (?, ?, 'member', 'new', ?, ?)").run(pid, groupId, date, `Added via Lifegroup report${meta.byName ? ' by ' + meta.byName : ''}`);
+        if (!cur) { assertRoom(db, groupId, g.name); db.prepare("INSERT INTO lifegroup_memberships (person_id, lifegroup_id, role, tier, joined_at, notes) VALUES (?, ?, 'member', 'new', ?, ?)").run(pid, groupId, date, `Added via Lifegroup report${meta.byName ? ' by ' + meta.byName : ''}`); }
       } else {
+        assertRoom(db, groupId, g.name);
         const info = db.prepare(`INSERT INTO people (first_name, last_name, full_name_normalized, sex, status, date_registered, notes, registration_source, added_via, registered_at, created_by)
           VALUES (@first_name, @last_name, @norm, @sex, 'first_timer', @date, @notes, 'manual', 'lifegroup_link', datetime('now'), @uid)`)
           .run({ first_name, last_name: last_name || first_name, norm: normalizeName(name), sex: SEX_OF[g.gender] || null, date, notes: `Added from ${g.name} Lifegroup report${meta.byName ? ' by ' + meta.byName : ''} (${date}). Please complete contact details.`, uid: meta.user ? meta.user.id : null });
@@ -356,7 +391,9 @@ function leaderNetworkView(db, leaderPersonId, { weeks = 4 } = {}) {
     return { id: g.id, name: g.name, leader_name: g.leader_name, leader_person_id: g.leader_person_id, schedule_day: g.schedule_day, schedule_time: g.schedule_time,
       solid: g.solid, total: g.total, target: g.target, is_solid: g.is_solid, held_last_4: g.held_last_4, met_this_week: g.met_this_week,
       this_week: !w || !w.meeting ? 'none' : w.meeting.held ? 'held' : 'skip', last_meeting: w && w.meeting ? w.meeting : null, calendar: g.calendar,
-      solid_members: mem.filter((m) => m.tier === 'solid'), other_members: mem.filter((m) => m.tier !== 'solid') };
+      solid_members: mem.filter((m) => m.tier === 'solid'), other_members: mem.filter((m) => m.tier !== 'solid'),
+      // last reports: did they hold the Lifegroup, and who was present (names only — shown to the network leader)
+      recent: meetingsOf(db, g.id, 4).map((m) => ({ id: m.id, meeting_date: m.meeting_date, held: Boolean(m.held), no_meeting_reason: m.no_meeting_reason, present_count: m.present_count, present: m.present.map((x) => x.name) })) };
   });
   return { networks: nets, weeks: recentWeeks(db, weeks, s), groups, summary: summarize(rows) };
 }
@@ -452,4 +489,4 @@ function overview(db, { weeks = 8 } = {}) {
     networks, groups: rows, boys: summarize(rows.filter((g) => g.gender === 'boys')), girls: summarize(rows.filter((g) => g.gender === 'girls')) };
 }
 
-module.exports = { settings, target, recentWeeks, mondayOf, addDays, churchToday, ensureToken, resetToken, groupByToken, members, memberWeeks, meetingsOf, calendar, progress, setTier, leaveMember, restoreMember, formerMembers, recordMeeting, deleteMeeting, networkCalendar, leaderNetworkView, networkStatus, overview, summarize };
+module.exports = { settings, target, recentWeeks, mondayOf, addDays, churchToday, ensureToken, resetToken, groupByToken, members, memberWeeks, meetingsOf, calendar, progress, setTier, leaveMember, restoreMember, formerMembers, recordMeeting, maxMembers, assertRoom, NETWORK_LEADER_MAX, deleteMeeting, networkCalendar, leaderNetworkView, networkStatus, overview, summarize };

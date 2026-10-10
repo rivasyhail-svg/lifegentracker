@@ -97,8 +97,8 @@ export const isSundayStr = (str) => { const d = parseDate(str); return d && d.ge
 export function addDays(str, n) { const d = parseDate(str); d.setDate(d.getDate() + n); return toISODate(d); }
 
 export const STATUS_LABELS = {
-  first_timer: 'First Timer', new_believer: 'New Believer', regular: 'Regular Attendee',
-  member: 'Member', leader: 'Leader', volunteer: 'Volunteer', inactive: 'Inactive',
+  first_timer: 'First Timer', regular: 'Regular Attendee',
+  member: 'Member', leader: 'Leader', inactive: 'Inactive',
 };
 export const DAY_LABELS = { mon: 'Monday', tue: 'Tuesday', wed: 'Wednesday', thu: 'Thursday', fri: 'Friday', sat: 'Saturday', sun: 'Sunday' };
 export const DAY_SHORT = { mon: 'Mon', tue: 'Tue', wed: 'Wed', thu: 'Thu', fri: 'Fri', sat: 'Sat', sun: 'Sun' };

@@ -34,7 +34,7 @@ function load(db, userId) {
   if (status(db).loaded) return { ...status(db), message: 'Demo data is already loaded.' };
 
   const sundays = lastSundays(DEMO_SUNDAYS);
-  const statuses = ['regular', 'regular', 'member', 'member', 'new_believer', 'volunteer', 'leader', 'first_timer'];
+  const statuses = ['regular', 'regular', 'member', 'member', 'regular', 'member', 'leader', 'first_timer'];
   // Deterministic pseudo-random so the demo looks the same each time.
   let seed = 42;
   const rand = () => { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
@@ -124,7 +124,7 @@ function load(db, userId) {
     });
     // Progress demo: some long-time members tagged Solid, and weekly meeting reports for the last 6 weeks.
     db.prepare(`UPDATE lifegroup_memberships SET tier = 'solid' WHERE left_at IS NULL AND lifegroup_id IN (${groups.join(',')})
-      AND person_id IN (SELECT id FROM people WHERE is_demo = 1 AND status IN ('member','leader','volunteer','regular'))`).run();
+      AND person_id IN (SELECT id FROM people WHERE is_demo = 1 AND status IN ('member','leader','regular'))`).run();
     db.prepare("UPDATE lifegroup_memberships SET tier = 'solid' WHERE left_at IS NULL AND lifegroup_id = ?").run(JOSHUA); // one solid Lifegroup in the demo
     const insertMeet = db.prepare(`INSERT OR IGNORE INTO lifegroup_meetings (lifegroup_id, meeting_date, held, no_meeting_reason, topic, notes, present_count, submitted_via, submitted_by_name)
       VALUES (?, ?, ?, ?, ?, 'DEMO DATA', ?, 'leader_link', 'Demo leader')`);
