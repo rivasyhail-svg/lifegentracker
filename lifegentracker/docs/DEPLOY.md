@@ -298,3 +298,9 @@ Enforced in three layers:
 - Network counts (Lifegroups, members, Closed/Open cell) exclude the network leader's own Lifegroup (it holds the cell leaders, which are counted as "Cell leaders n / 6").
 - Tests: new "Independent networks" test covers the 7 required scenarios (create A, create B while A exists, several leaders, every way of nesting rejected via API, cells belong only to their network, no shared members/permissions, DB-level guard); 79/79 on SQLite and Postgres.
 - Version `v2026.10.10-3n`.
+
+## Update 3o — Network QR always loads (2026-10-10)
+- Before: a Network whose leader had no Lifegroup yet showed an empty QR box ("… does not lead a Lifegroup yet"). The Network QR is the leader's own Lifegroup link, so without that Lifegroup there was nothing to show.
+- Now: opening a Network page (staff/admin) creates the leader's own Lifegroup once — **"<Network name> Leaders"** (same boys/girls type, in that Network, holds the cell leaders, max 6) — and the QR, Copy link, Link/print/New QR and Report a meeting all work immediately. Never duplicated; if the leader already leads a Lifegroup that one is used.
+- New endpoint `POST /api/networks/:id/leader-group` (lifegroups:manage) → `{ lifegroup_id, name, created }`; clear 400 messages when the Network has no registered leader or no boys/girls type (press Edit first).
+- QR-only change; nothing else touched. Version `v2026.10.10-3o`.

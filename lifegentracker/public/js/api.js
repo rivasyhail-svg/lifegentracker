@@ -118,6 +118,7 @@ export const api = {
   network: (id) => request('GET', `/api/networks/${id}`),
   createNetwork: (data) => request('POST', '/api/networks', data),
   updateNetwork: (id, data) => request('PUT', `/api/networks/${id}`, data),
+  ensureNetworkLeaderGroup: (id) => request('POST', `/api/networks/${id}/leader-group`),
   deleteNetwork: (id) => request('DELETE', `/api/networks/${id}`),
   leaveLifegroup: (groupId, personId, leftAt) => request('DELETE', `/api/lifegroups/${groupId}/members/${personId}` + qs({ left_at: leftAt })),
   deletePerson: (id) => request('DELETE', `/api/people/${id}`),

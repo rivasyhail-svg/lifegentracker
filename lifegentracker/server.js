@@ -95,9 +95,9 @@ api.use((req, res, next) => {
 });
 api.get('/health', (req, res) => {
   if (dbInitError && !tryInitDb()) {
-    return res.status(503).json({ ok: false, app: 'LifegenTracker', version: '2026.10.10-3n', time: new Date().toISOString(), db: 'error', db_error: dbInitError.message, hint: dbHint(dbInitError) });
+    return res.status(503).json({ ok: false, app: 'LifegenTracker', version: '2026.10.10-3o', time: new Date().toISOString(), db: 'error', db_error: dbInitError.message, hint: dbHint(dbInitError) });
   }
-  res.json({ ok: true, app: 'LifegenTracker', version: '2026.10.10-3n', time: new Date().toISOString(), db: 'ok' });
+  res.json({ ok: true, app: 'LifegenTracker', version: '2026.10.10-3o', time: new Date().toISOString(), db: 'ok' });
 });
 // Every other API call needs the database; answer clearly instead of crashing while it is unavailable.
 api.use((req, res, next) => {

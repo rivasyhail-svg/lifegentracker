@@ -569,9 +569,15 @@ async function networkForm(n, onSaved) {
   modal.querySelector('#netForm').onsubmit = save;
 }
 
-export async function renderNetwork({ main }, id, openGroups = new Set()) {
+export async function renderNetwork({ main }, id, openGroups = new Set(), { autoTried = false } = {}) {
   const [n, cal] = await Promise.all([api.network(id), api.networkCalendar(id, 8, { members: true }).catch(() => null)]);
   const manage = can('lifegroups:manage');
+  // The Network QR is the network leader's own Lifegroup link. If the leader has no Lifegroup yet, create it once
+  // ("<Network> Leaders" — it holds the cell leaders) so the QR always loads.
+  let autoErr = '';
+  if (manage && n.leader_person_id && !(cal && cal.groups && cal.groups.some((g) => g.is_leader_group)) && !autoTried) {
+    try { await api.ensureNetworkLeaderGroup(id); return renderNetwork({ main }, id, openGroups, { autoTried: true }); } catch (e) { autoErr = e.message; }
+  }
   const netTarget = cal ? cal.target : 6;
   const last4Of = (gid, pid) => (cal && cal.members_last4 && cal.members_last4[gid] ? cal.members_last4[gid][pid] || null : null);
   // independent network: root = the network leader (their own Lifegroup = the cell leaders); children = the cell leaders' Lifegroups
@@ -597,7 +603,7 @@ export async function renderNetwork({ main }, id, openGroups = new Set()) {
         <b>Network QR · ${n.name}</b>
         ${leaderGroup ? html`<div class="small muted">For this Network only. ${n.leader_name || 'The network leader'} scans it — no login — to see their cell leaders (held Lifegroup? who was present? Open / Closed cell) and to send the weekly report of <a href="#/lifegroups/${leaderGroup.id}">${leaderGroup.name}</a>. Press <b>New QR</b> if somebody else gets the link.</div>
           <div class="row mt-1" style="gap:8px;flex-wrap:wrap"><button class="btn btn--sm" id="netQrOpen">${icon('link', 14)} Link, print &amp; New QR</button><button class="btn btn--sm" id="netQrCopy">${icon('copy', 14)} Copy link</button></div>`
-        : html`<div class="small muted">${n.leader_person_id ? `${n.leader_name} does not lead a Lifegroup yet. Create their Lifegroup (leader = ${n.leader_name}) and the Network QR appears here automatically.` : 'Set the network leader first (Edit) — the QR is created automatically once they lead a Lifegroup.'}</div>`}
+        : html`<div class="small muted">${autoErr ? html`<span class="alert alert--error" style="display:inline-block;padding:6px 10px">${autoErr}</span>` : n.leader_person_id ? `Could not prepare ${n.leader_name}’s Lifegroup for the QR. Reload the page or create their Lifegroup (leader = ${n.leader_name}).` : 'Set the network leader first (Edit) — the Network QR is created automatically after that.'}</div>`}
       </div>
     </div>` : ''}
 

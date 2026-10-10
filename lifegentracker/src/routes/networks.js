@@ -122,6 +122,33 @@ router.get('/:id/calendar', requirePermission('lifegroups:view'), wrap((req, res
   res.json(prog.networkCalendar(getDb(), intId(req.params.id), { weeks: Math.min(Math.max(Number(req.query.weeks) || 8, 4), 26), withMembers: req.query.members === '1' }));
 }));
 
+// POST /api/networks/:id/leader-group — make sure the network leader has their own Lifegroup (it holds the cell leaders
+// and carries the Network QR / report link). Creates "<Network> Leaders" once; returns the group id either way.
+router.post('/:id/leader-group', requirePermission('lifegroups:manage'), wrap((req, res) => {
+  const db = getDb();
+  const id = intId(req.params.id);
+  const n = db.prepare('SELECT * FROM networks WHERE id = ?').get(id);
+  if (!n) throw new HttpError(404, 'Network not found.');
+  if (!n.leader_person_id) throw new HttpError(400, 'Set the network leader first (Edit) — the Network QR belongs to the leader.');
+  if (!['boys', 'girls'].includes(n.gender)) throw new HttpError(400, 'Choose Boys network or Girls network first (Edit).');
+  const lp = db.prepare('SELECT id, first_name, last_name, sex FROM people WHERE id = ? AND archived_at IS NULL').get(n.leader_person_id);
+  if (!lp) throw new HttpError(400, 'The network leader is no longer a registered person — pick a leader (Edit).');
+  if (lp.sex && lp.sex !== SEX_OF[n.gender]) throw new HttpError(400, `${lp.first_name} ${lp.last_name} cannot lead a ${WORD[n.gender]} network — networks are never mixed.`);
+  let g = db.prepare('SELECT id, name FROM lifegroups WHERE leader_person_id = ? AND is_active = 1 ORDER BY (network_id = ?) DESC, id LIMIT 1').get(lp.id, id);
+  let created = false;
+  if (!g) {
+    const name = /leaders$/i.test(n.name) ? n.name : `${n.name} Leaders`;
+    const info = db.prepare(`INSERT INTO lifegroups (name, gender, leader_person_id, network_id, network_manual, network, notes, is_active, is_demo, created_by)
+      VALUES (?, ?, ?, ?, 0, ?, ?, 1, ?, ?)`).run(name, n.gender, lp.id, id, n.name, 'Network leader’s own Lifegroup — its members are the cell leaders (max 6).', n.is_demo ? 1 : 0, req.user.id);
+    g = { id: info.lastInsertRowid, name };
+    created = true;
+    activity.log(db, req.user, 'lifegroup.create', 'lifegroup', g.id, `Created ${name} (network leader ${lp.first_name} ${lp.last_name}’s own Lifegroup) for the Network QR`);
+  }
+  prog.ensureToken(db, g.id);
+  syncNetworks(db, req.user);
+  res.status(created ? 201 : 200).json({ lifegroup_id: g.id, name: g.name, created });
+}));
+
 // GET /api/networks/:id — one independent network: its leader, its Lifegroups (with leaders + members). Never other networks.
 router.get('/:id', requirePermission('lifegroups:view'), wrap((req, res) => {
   const db = getDb();
