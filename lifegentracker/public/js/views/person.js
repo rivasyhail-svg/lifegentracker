@@ -77,7 +77,7 @@ export async function renderPerson({ main }, id) {
 
     ${archived ? html`<div class="alert alert--info mt-3">This person is archived — hidden from People, search and the Sunday roster. Attendance history is kept.${can('people:write') ? html` <button class="btn btn--sm" id="restoreBtn" style="margin-left:8px">Restore</button>` : ''}</div>` : ''}
     ${can('people:write') && !archived ? html`<div class="row row--between mt-3" style="padding:0 4px">
-      <span class="small muted">${inactive ? 'This person is inactive and not shown on the Sunday roster.' : 'Deactivating keeps all history but removes the person from the Sunday roster.'}</span>
+      <span class="small muted">${inactive ? 'Inactive — not on the Sunday roster.' : ''}</span>
       <span class="row">
         <button class="btn ${inactive ? '' : 'btn--danger-ghost'}" id="toggleActive">${inactive ? 'Reactivate' : 'Deactivate'}</button>
         <button class="btn btn--ghost small" id="archiveBtn" style="color:var(--muted)" title="Hide from lists; keep history">Archive</button>
@@ -172,7 +172,7 @@ function lifegroupCard(p) {
           <div><dt>Status</dt><dd class="current">Active</dd></div>
         </dl>`
       : html`<div class="row row--between" style="flex-wrap:wrap">
-          <div><div><b>No Lifegroup yet</b></div><div class="small muted">${p.archived_at ? 'Archived people cannot be assigned.' : 'Assign them to their leader’s Lifegroup.'}</div></div>
+          <div><div><b>No Lifegroup yet</b></div>${p.archived_at ? html`<div class="small muted">Archived people cannot be assigned.</div>` : ''}</div>
         </div>`}
       ${leadershipBlock(p)}
       ${hist.length > (g ? 1 : 0) || (hist.length && !g) ? html`<details class="mt-2 small"><summary class="muted">History (${hist.length})</summary>

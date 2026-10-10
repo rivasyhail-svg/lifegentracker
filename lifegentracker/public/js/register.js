@@ -217,6 +217,48 @@ function showClosed({ reason, message, ref_code }) {
 }
 
 // ---- boot ----
+// ---- tap-to-pick leader / network leader ----
+// The text inputs stay the source of truth (same names, validation, draft, review and submit as before);
+// the pickers only fill them. Picking a leader also fills their network leader.
+function setupPickers() {
+  const leaders = Array.isArray(options.leader_options) ? options.leader_options : [];
+  const nets = Array.isArray(options.network_leader_options) ? options.network_leader_options : [];
+  const set = (name, val) => { const el = form.elements[name]; if (el.value !== val) { el.value = val; el.dispatchEvent(new Event('input', { bubbles: true })); } showError(name, ''); };
+  const tag = (g) => g ? `<span class="reg-pick__tag reg-pick__tag--${g}">${g === 'boys' ? 'Boys' : 'Girls'}</span>` : '';
+  const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+  function build(pickId, manualId, name, items, render, onPick) {
+    const pick = $(pickId), manual = $(manualId), list = $('.reg-pick__list', pick), other = $('.reg-pick__other', pick), search = $('.reg-pick__search', pick);
+    if (!items.length) return; // nothing to tap → plain text box as before
+    const current = () => tidy(form.elements[name].value).toLowerCase();
+    const draw = () => {
+      const q = search ? tidy(search.value).toLowerCase() : '';
+      const rows = items.filter((it) => !q || it.name.toLowerCase().includes(q) || (it.network_leader || '').toLowerCase().includes(q));
+      list.innerHTML = rows.length ? rows.map((it, i) => `<button type="button" class="reg-pick__opt ${it.name.toLowerCase() === current() ? 'is-selected' : ''}" data-i="${items.indexOf(it)}" role="option" aria-selected="${it.name.toLowerCase() === current()}">${render(it)}</button>`).join('')
+        : '<div class="reg-pick__empty">No name matches. Tap “Not on the list” to type it.</div>';
+    };
+    list.addEventListener('click', (e) => {
+      const btn = e.target.closest('.reg-pick__opt'); if (!btn) return;
+      const it = items[Number(btn.dataset.i)]; if (!it) return;
+      set(name, it.name); draw(); if (onPick) onPick(it);
+    });
+    if (search) search.addEventListener('input', draw);
+    other.addEventListener('click', () => { pick.hidden = true; manual.hidden = false; form.elements[name].focus(); });
+    // typed value that is not on the list (e.g. restored draft "None yet") → show the text box instead
+    const typed = tidy(form.elements[name].value);
+    if (typed && !items.some((it) => it.name.toLowerCase() === typed.toLowerCase())) { pick.hidden = true; manual.hidden = false; }
+    else { pick.hidden = false; manual.hidden = true; }
+    draw();
+    return { draw, show: () => { pick.hidden = false; manual.hidden = true; draw(); } };
+  }
+
+  const netPick = build('#networkPick', '#networkManual', 'network_leader_name', nets,
+    (it) => `<span><b>${esc(it.name)}</b><span class="reg-pick__sub">Network leader</span></span>${tag(it.gender)}`);
+  build('#leaderPick', '#leaderManual', 'leader_name', leaders,
+    (it) => `<span><b>${esc(it.name)}</b><span class="reg-pick__sub">${it.network_leader ? 'Network leader: ' + esc(it.network_leader) : 'Lifegroup leader'}</span></span>${tag(it.gender)}`,
+    (it) => { if (it.network_leader) { set('network_leader_name', it.network_leader); if (netPick) netPick.show(); } });
+}
+
 function fillList(id, items) {
   const dl = $(id);
   dl.innerHTML = '';
@@ -247,6 +289,7 @@ async function boot() {
   fillList('#leaderList', options.leaders);
   fillList('#networkLeaderList', options.network_leaders);
   loadDraft();
+  setupPickers();
   form.hidden = false;
 
   form.addEventListener('input', (e) => {

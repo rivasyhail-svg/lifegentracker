@@ -49,8 +49,8 @@ export function renderSetup(root, onSuccess) {
       <div id="setupError" class="alert alert--error" hidden></div>
       <div class="field"><label>Church name</label><input name="church_name" value="Lifegiver Church of Faith" /></div>
       <div class="field"><label>Your name <span class="req">*</span></label><input name="display_name" placeholder="e.g. Pastor Juan" required /></div>
-      <div class="field"><label>Username <span class="req">*</span></label><input name="username" autocomplete="username" placeholder="e.g. admin" required /><span class="help">3–32 characters: letters, numbers, dots, dashes or underscores.</span></div>
-      <div class="field"><label>Password <span class="req">*</span></label><input name="password" type="password" autocomplete="new-password" required /><span class="help">At least 8 characters.</span></div>
+      <div class="field"><label>Username <span class="req">*</span></label><input name="username" autocomplete="username" placeholder="e.g. admin" required /></div>
+      <div class="field"><label>Password <span class="req">*</span></label><input name="password" type="password" autocomplete="new-password" required placeholder="At least 8 characters" /></div>
       <div class="field"><label>Confirm password <span class="req">*</span></label><input name="confirm" type="password" autocomplete="new-password" required /></div>
       <button class="btn btn--primary btn--lg btn--block" type="submit">Create admin account</button>
     </form>`);

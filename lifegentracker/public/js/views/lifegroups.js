@@ -80,20 +80,19 @@ async function groupForm(g, onSaved) {
         <div class="choice">
           <label class="choice__opt"><input type="radio" name="gender" value="boys" ${g?.gender === 'boys' ? 'checked' : ''} /><span>Boys group</span></label>
           <label class="choice__opt"><input type="radio" name="gender" value="girls" ${g?.gender === 'girls' ? 'checked' : ''} /><span>Girls group</span></label>
-        </div><span class="help">Groups are never mixed — only boys can join a boys group, only girls a girls group.</span></div>
-      <div class="field"><label>Network</label><select name="network_id"><option value="" ${!g || !g.network_manual ? 'selected' : ''}>Auto — from the leader's own Lifegroup${g && !g.network_manual && g.network ? ' (now: ' + esc(g.network) + ')' : ''}</option>${(opts.networks || []).map((n) => `<option value="${n.id}" data-gender="${n.gender || ''}" ${g?.network_manual && Number(g?.network_id) === n.id ? 'selected' : ''}>${esc(n.name)}${n.gender ? ' (' + n.gender + ')' : ''}${n.leader_name ? ' · ' + esc(n.leader_name) : ''}</option>`).join('')}</select><span class="help">Auto: the network is the one led by the leader's own Lifegroup leader, and updates itself. Pick a network only to override by hand.</span></div>
+        </div></div>
+      <div class="field"><label>Network</label><select name="network_id"><option value="" ${!g || !g.network_manual ? 'selected' : ''}>Auto — from the leader's own Lifegroup${g && !g.network_manual && g.network ? ' (now: ' + esc(g.network) + ')' : ''}</option>${(opts.networks || []).map((n) => `<option value="${n.id}" data-gender="${n.gender || ''}" ${g?.network_manual && Number(g?.network_id) === n.id ? 'selected' : ''}>${esc(n.name)}${n.gender ? ' (' + n.gender + ')' : ''}${n.leader_name ? ' · ' + esc(n.leader_name) : ''}</option>`).join('')}</select></div>
       <div class="field span-2 gsearch-field"><label>Leader <span class="opt">registered person</span></label>
         <div class="gsearch" style="max-width:none">${icon('search', 16).value}<input id="leaderPick" aria-label="Search a registered person to be leader" placeholder="Search a registered person…" autocomplete="off" /><div class="gsearch__results" id="leaderPickResults" hidden></div></div>
         <input type="hidden" id="leaderId" name="leader_person_id" />
         <span class="help" id="leaderHint"></span>
-        <span class="help">Or type a name below if the leader is not registered yet.</span>
         <input name="leader_name" value="${v('leader_name')}" placeholder="Leader name (if not registered)" autocomplete="off" style="margin-top:6px" /></div>
       <div class="field"><label>Category <span class="opt">optional</span></label><input name="category" value="${v('category')}" list="dlCat" autocomplete="off" placeholder="e.g. Students, Young Pro, Mixed" />${dl('dlCat', opts.categories)}</div>
       <div class="field"><label>Day <span class="opt">optional</span></label><select name="schedule_day"><option value="">—</option>${Object.entries(DAY_LABELS).map(([k, l]) => `<option value="${k}" ${g?.schedule_day === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
       <div class="field"><label>Time <span class="opt">optional</span></label><input name="schedule_time" type="time" value="${v('schedule_time')}" /></div>
       <div class="field"><label>Venue <span class="opt">optional</span></label><input name="venue" value="${v('venue')}" autocomplete="off" /></div>
       <div class="field span-2"><label>Notes <span class="opt">optional</span></label><textarea name="notes">${v('notes')}</textarea></div>
-      ${g ? `<div class="field span-2"><label class="toggle"><input type="checkbox" name="is_active" ${g.is_active ? 'checked' : ''}/> Group is active</label><span class="help">Inactive groups are hidden from recommendations and new assignments; history is kept.</span></div>` : ''}
+      ${g ? `<div class="field span-2"><label class="toggle"><input type="checkbox" name="is_active" ${g.is_active ? 'checked' : ''}/> Group is active</label></div>` : ''}
     </form>`,
     footer: `<button class="btn" data-close>Cancel</button><button class="btn btn--primary" id="saveGroup">${g ? 'Save' : 'Create Lifegroup'}</button>`,
   });
@@ -102,7 +101,7 @@ async function groupForm(g, onSaved) {
   const leaderHint = modal.querySelector('#leaderHint');
   const netSel = modal.querySelector('[name=network_id]');
   const refreshLeaderHint = () => {
-    const gg = genderNow(); leaderHint.textContent = gg ? `Only ${gg} are listed — a ${gg} group is led by a ${gg === 'boys' ? 'boy' : 'girl'}.` : 'Choose Boys group or Girls group above first.';
+    const gg = genderNow(); leaderHint.textContent = gg ? '' : 'Choose Boys group or Girls group first.';
     // only networks of the same type can hold this group
     netSel.querySelectorAll('option[data-gender]').forEach((o) => { const mismatch = gg && o.dataset.gender && o.dataset.gender !== gg; o.hidden = mismatch; o.disabled = mismatch; if (mismatch && o.selected) netSel.value = ''; });
   };
@@ -151,7 +150,7 @@ export async function findLifegroup(person, onAssigned) {
           <label class="choice__opt"><input type="radio" name="sex" value="male" ${sex === 'male' ? 'checked' : ''} ${person.sex ? 'disabled' : ''} /><span>Boy</span></label>
           <label class="choice__opt"><input type="radio" name="sex" value="female" ${sex === 'female' ? 'checked' : ''} ${person.sex ? 'disabled' : ''} /><span>Girl</span></label>
         </div>
-        <span class="small muted">${person.sex ? 'Only ' + (person.sex === 'male' ? 'boys' : 'girls') + ' groups are shown — groups are never mixed.' : 'Not set on the profile yet — choose one to see matching groups (it will be saved).'}</span>
+        ${person.sex ? '' : '<span class="small muted">Not set yet — choose one to see matching groups.</span>'}
       </div>
       <div class="gsearch mb-2" style="max-width:none">${icon('search', 16).value}<input id="findQ" placeholder="Filter by group, leader or network…" autocomplete="off" aria-label="Filter Lifegroups" /></div>
       <div id="recList"><div class="loading">Loading…</div></div>`,
@@ -217,7 +216,7 @@ export async function renderLifegroups({ main, query }) {
 
   main.innerHTML = html`
     <div class="page-header">
-      <div><h1>Lifegroups</h1><p class="sub">Connect people to a cell group after Sunday</p></div>
+      <div><h1>Lifegroups</h1></div>
       <div class="page-actions">${can('lifegroups:manage') ? html`<button class="btn btn--primary" id="newGroup">${icon('plus')} New Lifegroup</button>` : ''}</div>
     </div>
     ${overview ? (() => { const st = overview.structure || { networks: overview.networks, cell_leaders: 0, lifegroups: overview.active_groups, closed_cell: overview.closed_cell, open_cell: overview.open_cell, boys: {}, girls: {} }; const sub = (k) => html`<div class="small muted" style="text-transform:none;letter-spacing:0;font-weight:500">${st.boys[k] || 0} boys · ${st.girls[k] || 0} girls</div>`; return html`<div class="kpi-row mb-2" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr))">
@@ -311,7 +310,7 @@ async function drawGroups(body, filters) {
         <div class="net-section__head"><h2>${label} ${genderBadge(key)} <span class="net-section__count">${ns.length}</span></h2><span class="small muted">${ns.length} network${ns.length === 1 ? '' : 's'}</span></div>
         ${blocks}
         ${loose.length ? html`<div class="card mb-2 netblock netblock--loose">
-          <div class="card__header netblock__head"><div><h2>No Network yet</h2><div class="small muted">These Lifegroups form a Network as soon as their leader joins another leader's Lifegroup.</div></div></div>
+          <div class="card__header netblock__head"><div><h2>No Network yet</h2></div></div>
           <div class="card__body card__body--flush">${table(loose, null)}</div>
         </div>` : ''}
       </section>`;
@@ -328,7 +327,6 @@ async function drawGroups(body, filters) {
 async function drawNeeds(body) {
   body.innerHTML = html`
     <div class="toolbar"><div class="gsearch grow" style="max-width:none">${icon('search', 17)}<input type="search" id="nq" placeholder="Search name or Person ID" autocomplete="off" /></div></div>
-    <p class="small muted mb-1">Active people (first timers, returning, members) who are <b>not in any Lifegroup</b>. Most recent attendees first — these are the ones to follow up.</p>
     <div class="card"><div id="nlist" class="card__body--flush"><div class="loading">Loading…</div></div></div>`;
   const list = body.querySelector('#nlist');
   let q = '';
@@ -388,7 +386,7 @@ export async function renderLifegroup({ main }, id) {
         <div class="card__header"><h2>Details</h2></div>
         <div class="card__body"><dl class="dl">
           <div><dt>Leader</dt>${g.leader_person_id ? html`<dd><a href="#/people/${g.leader_person_id}">${g.leader_name}</a>${g.leader_contact ? html` <span class="small muted">· ${g.leader_contact}</span>` : ''}</dd>` : g.leader_name ? html`<dd>${g.leader_name} <span class="small muted">(not registered)</span></dd>` : raw('<dd class="none">—</dd>')}</div>
-          <div><dt>Network</dt>${g.network_id ? html`<dd><a href="#/networks/${g.network_id}">${g.network}</a> <span class="small muted">${g.network_manual ? '· set by hand' : '· automatic'}</span></dd>` : g.network ? html`<dd>${g.network}</dd>` : html`<dd class="none">— <span class="small">forms once the leader joins another leader's Lifegroup</span></dd>`}</div>
+          <div><dt>Network</dt>${g.network_id ? html`<dd><a href="#/networks/${g.network_id}">${g.network}</a> <span class="small muted">${g.network_manual ? '· set by hand' : '· automatic'}</span></dd>` : g.network ? html`<dd>${g.network}</dd>` : html`<dd class="none">—</dd>`}</div>
           <div><dt>Network leader</dt>${g.network_leader_name ? html`<dd>${g.network_leader_person_id ? html`<a href="#/people/${g.network_leader_person_id}">${g.network_leader_name}</a>` : g.network_leader_name}<span class="small muted"> · leader reports here</span></dd>` : raw('<dd class="none">—</dd>')}</div>
           ${info('Category', g.category)}
           ${info('Day', DAY_LABELS[g.schedule_day])}
@@ -398,7 +396,7 @@ export async function renderLifegroup({ main }, id) {
         </dl></div>
       </div>
       ${g.leads_network ? html`<div class="card">
-        <div class="card__header"><h2>Cell leaders</h2><span class="hint">${g.member_count} / ${g.max_members} · each leads their own Lifegroup</span></div>
+        <div class="card__header"><h2>Cell leaders</h2><span class="hint">${g.member_count} / ${g.max_members}</span></div>
         <div class="card__body card__body--flush" id="membersCard">
           ${g.members.length ? html`<div class="table-wrap"><table class="table table--stack">
             <thead><tr><th>Cell leader</th><th>Present (last 4 wks)</th><th>Their Lifegroup</th><th class="num">Members</th><th class="num">Closed cell</th><th class="num">Open cell</th><th>Last held</th>${manage ? raw('<th></th>') : ''}</tr></thead>
@@ -412,19 +410,19 @@ export async function renderLifegroup({ main }, id) {
               <td data-label="Last held" class="small nowrap">${lg && lg.last_held ? fmtDate(lg.last_held, { short: true }) : raw('<span class="muted">—</span>')}</td>
               ${manage ? html`<td data-label="" class="actions nowrap"><button class="btn btn--ghost btn--sm" data-leave="${m.id}" data-name="${fullName(m)}">Remove</button></td>` : ''}
             </tr>`; })}</tbody></table></div>
-            <div class="card__footer small muted">${dotsKey()} · Present = attendance in this network leader's Lifegroup. Click a cell leader to see (and move) the members of their Open / Closed cell.</div>` : html`<div class="empty" style="padding:28px"><p>No cell leaders yet.${manage ? raw(' Use <b>Add member</b> to add up to 6 cell leaders.') : ''}</p></div>`}
+            <div class="card__footer small muted">${dotsKey()}</div>` : html`<div class="empty" style="padding:28px"><p>No cell leaders yet.${manage ? raw(' Use <b>Add member</b> to add up to 6 cell leaders.') : ''}</p></div>`}
         </div>
       </div>` : html`<div class="card">
         <div class="card__header"><h2>Members</h2><span class="hint">${g.members.filter((m) => m.tier !== 'solid').length} open cell · ${closedCount(g)} / ${g.solid_target} closed cell</span></div>
         <div class="card__body card__body--flush" id="membersCard">
           ${g.members.length ? html`${memberSections(g.members.map((m) => ({ ...m, name: fullName(m), sub: html`${raw(statusBadge(m.status))} <span class="muted">since ${fmtDate(m.joined_at, { short: true })}</span>` })), { manage,
               actions: (m) => html`<button class="btn btn--ghost btn--sm" data-leave="${m.id}" data-name="${fullName(m)}" title="Remove from this Lifegroup">Remove</button> ` })}
-            <div class="card__footer small muted">${dotsKey()} · Closed cell holds at most ${g.solid_target}; the open cell has no limit. The leader moves members on their QR page; staff can do it here.</div>` : html`<div class="empty" style="padding:28px"><p>No members yet.${manage ? raw(' Use <b>Add member</b> or assign from a person’s profile.') : ''}</p></div>`}
+            <div class="card__footer small muted">${dotsKey()}</div>` : html`<div class="empty" style="padding:28px"><p>No members yet.${manage ? raw(' Use <b>Add member</b> or assign from a person’s profile.') : ''}</p></div>`}
         </div>
       </div>`}
     </div>
     <div class="card mt-2" id="progressCard"></div>
-    ${g.former.length ? html`<div class="card mt-2"><div class="card__header"><h2>Former members</h2><span class="hint">History is kept</span></div>
+    ${g.former.length ? html`<div class="card mt-2"><div class="card__header"><h2>Former members</h2></div>
       <div class="card__body"><ul class="small" style="margin:0 0 0 18px;columns:2;column-gap:24px">${g.former.map((f) => html`<li><a href="#/people/${f.id}">${fullName(f)}</a> <span class="muted">· ${fmtDate(f.joined_at, { short: true })} → ${fmtDate(f.left_at, { short: true })}</span></li>`)}</ul></div></div>` : ''}
     ${can('people:delete') && !g.members.length && !g.former.length ? html`<div class="row mt-3" style="padding:0 4px"><button class="btn btn--ghost small" id="delGroup" style="color:var(--muted)">Delete this empty group</button></div>` : ''}`;
 
@@ -493,10 +491,10 @@ export async function renderLifegroup({ main }, id) {
     const modal = openModal({
       title: `Add member to ${g.name}`,
       body: `<div class="field gsearch-field"><label>Person</label><div class="gsearch" style="max-width:none">${icon('search', 16).value}<input id="memberPick" aria-label="Search a person to add" placeholder="${g.gender ? `Search a ${g.gender === 'boys' ? 'boy' : 'girl'}…` : 'Search a registered person…'}" autocomplete="off" /><div class="gsearch__results" id="memberPickResults" hidden></div></div><input type="hidden" id="memberId" />
-        ${g.gender ? `<span class="help">${g.name} is a ${g.gender} group — only ${g.gender} are listed.</span>` : ''}</div>
+        </div>
         <div class="form-grid mt-1"><div class="field"><label>Joined on</label><input type="date" id="joinedAt" value="${toISODate(new Date())}" /></div>
         <div class="field"><label>Role</label><select id="memberRole"><option value="member">Member</option><option value="assistant">Assistant</option><option value="leader">Leader</option></select></div></div>
-        <p class="small muted">If the person is already in another group they will be moved; the previous membership is kept in history.</p>`,
+        `,
       footer: `<button class="btn" data-close>Cancel</button><button class="btn btn--primary" id="saveMember">Add to group</button>`,
     });
     modal.querySelector('[data-close]').onclick = closeModal;
@@ -528,12 +526,11 @@ async function networkForm(n, onSaved) {
         <div class="choice">
           <label class="choice__opt"><input type="radio" name="gender" value="boys" ${n?.gender === 'boys' ? 'checked' : ''} /><span>Boys network</span></label>
           <label class="choice__opt"><input type="radio" name="gender" value="girls" ${n?.gender === 'girls' ? 'checked' : ''} /><span>Girls network</span></label>
-        </div><span class="help">A Network is never combined — a boys network holds boys groups only, a girls network girls groups only.</span></div>
+        </div></div>
       <div class="field span-2 gsearch-field"><label>Network leader <span class="opt">registered person</span></label>
         <div class="gsearch" style="max-width:none">${icon('search', 16).value}<input id="netLeaderPick" aria-label="Search a registered person to be Network leader" placeholder="Search a registered person…" autocomplete="off" /><div class="gsearch__results" id="netLeaderPickResults" hidden></div></div>
         <input type="hidden" id="netLeaderId" name="leader_person_id" />
         <span class="help" id="netLeaderHint"></span>
-        <span class="help">The root of this Network. Cell leaders in this Network report to this person; this person reports to no other Network leader.</span>
         <input name="leader_name" value="${v('leader_name')}" placeholder="Leader name (if not registered)" autocomplete="off" style="margin-top:6px" /></div>
       <div class="field span-2"><label>Notes <span class="opt">optional</span></label><textarea name="notes">${v('notes')}</textarea></div>
       ${n ? `<div class="field span-2"><label class="toggle"><input type="checkbox" name="is_active" ${n.is_active ? 'checked' : ''}/> Network is active</label></div>` : ''}
@@ -545,7 +542,7 @@ async function networkForm(n, onSaved) {
   const netHint = modal.querySelector('#netLeaderHint');
   const syncNetGender = (clearLeader) => {
     const gg = netGenderNow();
-    netHint.textContent = gg ? `Only ${gg} are listed — a ${gg} network is led by a ${gg === 'boys' ? 'boy' : 'girl'}.` : 'Choose Boys network or Girls network above first.';
+    netHint.textContent = gg ? '' : 'Choose Boys network or Girls network first.';
     if (clearLeader && modal.querySelector('#netLeaderId').value) { modal.querySelector('#netLeaderId').value = ''; modal.querySelector('#netLeaderPick').value = ''; }
   };
   syncNetGender(false);
@@ -601,7 +598,7 @@ export async function renderNetwork({ main }, id, openGroups = new Set(), { auto
       <div class="netqr__img" id="netQrImg">${leaderGroup ? raw('<div class="loading small">…</div>') : ''}</div>
       <div class="netqr__text">
         <b>Network QR · ${n.name}</b>
-        ${leaderGroup ? html`<div class="small muted">For this Network only. ${n.leader_name || 'The network leader'} scans it — no login — to see their cell leaders (held Lifegroup? who was present? Open / Closed cell) and to send the weekly report of <a href="#/lifegroups/${leaderGroup.id}">${leaderGroup.name}</a>. Press <b>New QR</b> if somebody else gets the link.</div>
+        ${leaderGroup ? html`<div class="small muted">Weekly report of <a href="#/lifegroups/${leaderGroup.id}">${leaderGroup.name}</a> · no login needed.</div>
           <div class="row mt-1" style="gap:8px;flex-wrap:wrap"><button class="btn btn--sm" id="netQrOpen">${icon('link', 14)} Link, print &amp; New QR</button><button class="btn btn--sm" id="netQrCopy">${icon('copy', 14)} Copy link</button></div>`
         : html`<div class="small muted">${autoErr ? html`<span class="alert alert--error" style="display:inline-block;padding:6px 10px">${autoErr}</span>` : n.leader_person_id ? `Could not prepare ${n.leader_name}’s Lifegroup for the QR. Reload the page or create their Lifegroup (leader = ${n.leader_name}).` : 'Set the network leader first (Edit) — the Network QR is created automatically after that.'}</div>`}
       </div>
@@ -617,7 +614,7 @@ export async function renderNetwork({ main }, id, openGroups = new Set(), { auto
     </div>
 
     <div class="card mb-2">
-      <div class="card__header"><h2>Structure</h2><span class="hint">Network leader → Lifegroup leaders → members</span></div>
+      <div class="card__header"><h2>Structure</h2></div>
       <div class="card__body">
         <div class="tree">
           <div class="tree__root">

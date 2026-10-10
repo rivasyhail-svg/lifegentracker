@@ -11,7 +11,7 @@ export async function renderPeople({ main, query }) {
 
   main.innerHTML = html`
     <div class="page-header">
-      <div><h1>People</h1><p class="sub">Everyone registered for Lifegen</p></div>
+      <div><h1>People</h1></div>
       <div class="page-actions">
         ${can('reports:view') ? html`<button class="btn" id="exportPeople" title="Download as CSV">${icon('download')} Export</button>` : ''}
         ${can('people:write') ? html`<a class="btn btn--primary" href="#/people/new">${icon('plus')} Add person</a>` : ''}

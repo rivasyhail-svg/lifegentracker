@@ -68,7 +68,7 @@ export async function renderProgressCard(card, groupId, { onChange, onLoaded } =
       <div class="card__body stack">
         <div>
           <div class="progress"><span style="width:${p.percent}%"></span></div>
-          <p class="small muted mt-1">${p.is_solid ? 'This is a solid Lifegroup. Keep the weekly meetings going.' : `${p.target - p.solid} more solid member${p.target - p.solid === 1 ? '' : 's'} to become a solid Lifegroup — move members to the closed cell once they are committed and consistent.`}</p>
+          <p class="small muted mt-1">${p.is_solid ? 'Solid Lifegroup' : `${p.target - p.solid} more solid member${p.target - p.solid === 1 ? '' : 's'} to become a solid Lifegroup`}</p>
         </div>
         <div class="kpi-row" style="grid-template-columns:repeat(auto-fit,minmax(110px,1fr))">
           <div class="kpi"><b>${p.solid}<small>/${p.target}</small></b><span>Closed cell</span></div>
@@ -93,7 +93,7 @@ export async function renderProgressCard(card, groupId, { onChange, onLoaded } =
               <td data-label="Reason / notes" class="small">${m.held ? m.topic || raw('<span class="muted">—</span>') : m.no_meeting_reason}${m.notes ? html`<div class="muted">${m.notes}</div>` : ''}</td>
               <td data-label="Reported by" class="small muted">${m.submitted_via === 'leader_link' ? `${m.submitted_by_name || 'Leader'} · via link` : m.submitted_by_user_name || 'Staff'}</td>
               ${manage ? html`<td data-label="" class="actions"><button class="icon-btn" data-edit-meeting="${m.id}" title="Edit report" aria-label="Edit report">${icon('edit', 15)}</button><button class="icon-btn" data-del-meeting="${m.id}" title="Delete report" aria-label="Delete report">${icon('trash', 15)}</button></td>` : ''}
-            </tr>`)}</tbody></table></div>` : html`<p class="small muted">No meeting reported yet.${manage ? ' Share the leader link so the leader can report every week, or use Report a meeting.' : ''}</p>`}
+            </tr>`)}</tbody></table></div>` : html`<p class="small muted">No meeting reported yet.</p>`}
         </div>
       </div>`;
     card.querySelectorAll('[data-tier]').forEach((b) => {
@@ -122,11 +122,6 @@ export function linkDialog(groupId, p, onReset, { network = null } = {}) {
     title: network ? 'Network QR · network leader link' : 'Leader report link',
     subtitle: network ? `${network} · give this only to ${p.group.leader_name || 'the network leader'}` : `${p.group.name} · give this only to ${p.group.leader_name || 'the leader'}`,
     body: `<div class="stack">
-      ${network
-        ? `<p class="small">This QR belongs to <b>${esc(network)}</b> only. The network leader scans it on their phone — no login — and sees <b>My cell leaders</b> (who held Lifegroup, who was present, each one's Open / Closed cell) plus the <b>Weekly report</b> for their own Lifegroup. Anyone with the link can report for this network, so keep it private.</p>
-           <p class="small"><b>Permanent and unique to this Network.</b> Every Network gets its own QR automatically. If someone else gets hold of it, press <i>New QR</i> — the old one stops working at once.</p>`
-        : `<p class="small">The leader opens this link (or scans the QR) on their phone — no login — and reports each week with a few taps: date, who was there, who had devotion, newcomers. A network leader also sees every Lifegroup in their network there. Anyone with the link can report for this group, so keep it private.</p>
-           <p class="small"><b>Permanent and unique to this Lifegroup.</b> Print it once — it keeps working every week and never changes unless you press <i>New link</i>.</p>`}
       <div class="qr-preview" id="lgQr" style="max-width:220px;margin:0 auto">${p.report_qr || ''}</div>
       <div class="field"><label>Link</label><input id="lgLinkUrl" readonly value="${esc(p.report_link || '')}" /></div>
       <div class="row" style="gap:8px;flex-wrap:wrap">
@@ -135,7 +130,6 @@ export function linkDialog(groupId, p, onReset, { network = null } = {}) {
         <button class="btn btn--sm" id="lgPrint">${icon('print', 14).value} Print QR</button>
         <button class="btn btn--sm btn--ghost" id="lgReset" style="margin-left:auto;color:var(--red-600)">${icon('undo', 14).value} ${network ? 'New QR' : 'New link'}</button>
       </div>
-      <p class="small muted">“${network ? 'New QR' : 'New link'}” stops the old link from working — use it if the link was shared with the wrong person or the leader changed.</p>
     </div>`,
     footer: `<button class="btn" data-close>Close</button>`,
   });
@@ -183,9 +177,8 @@ export function meetingForm(groupId, p, existing, onSaved) {
         <div class="field"><label>Topic <span class="opt">optional</span></label><input name="topic" value="${esc(existing?.topic || '')}" maxlength="160" placeholder="e.g. Prayer, Identity in Christ" /></div>
         <div class="field mt-1"><label>Who was present?</label>
           ${p.members.length ? `<div class="checklist">${p.members.map((m) => `<label class="checklist__item"><input type="checkbox" name="present" value="${m.id}" ${presentIds.has(m.id) ? 'checked' : ''} /><span>${esc(m.first_name + ' ' + m.last_name)}</span>${m.tier === 'solid' ? '<span class="badge badge--present badge--nodot">Closed cell</span>' : ''}<label class="small muted" style="margin-left:auto;display:inline-flex;gap:4px;align-items:center"><input type="checkbox" name="devotion" value="${m.id}" ${devoIds.has(m.id) ? 'checked' : ''} /> Devotion</label></label>`).join('')}</div>` : '<p class="small muted">No members yet.</p>'}
-          <span class="help">Present = attended the Lifegroup · Devotion = had their personal devotion this week.</span>
         </div>
-        <div class="field mt-1"><label>Newcomers <span class="opt">optional · one full name per line</span></label><textarea name="new_members" rows="2" placeholder="Juan Dela Cruz&#10;Maria Santos"></textarea><span class="help">They are registered as new Lifegroup members (status First Timer) and counted present. Add contact details later from People.</span></div>
+        <div class="field mt-1"><label>Newcomers <span class="opt">optional · one full name per line</span></label><textarea name="new_members" rows="2" placeholder="Juan Dela Cruz&#10;Maria Santos"></textarea></div>
       </div>
       <div class="field"><label>Notes <span class="opt">optional</span></label><textarea name="notes" rows="2" maxlength="1000">${esc(existing?.notes || '')}</textarea></div>
     </form>`,
@@ -251,8 +244,6 @@ export async function drawProgressTab(body) {
       <div class="kpi"><b>${s.consistency_pct}%</b><span>Held, last 4 weeks</span></div>
       <div class="kpi"><b>${s.networks}</b><span>Networks</span></div>
     </div>
-    <p class="small muted mb-2">A Lifegroup is <b>solid</b> once its closed cell has ${d.target} members (the closed cell holds at most ${d.target}). The leader moves members between open and closed cell on their QR page (or staff here). Members sit in the <b>open cell</b> (new) until the leader moves them to the <b>closed cell</b> (committed, consistent).</p>
-    <p class="small muted mb-2">Per-network ratios (solid %, held, attendance, devotion) are in <a href="#/reports?view=lifegroups">Reports → Lifegroups</a>; open a <a href="#/lifegroups?tab=networks">Network</a> for its weekly grid.</p>
     <div class="card"><div class="card__header"><h2>Every Lifegroup</h2><div class="gsearch" style="max-width:260px">${icon('search', 15)}<input id="pgq" placeholder="Filter…" autocomplete="off" aria-label="Filter groups" /></div></div><div class="card__body card__body--flush" id="pgAll"></div></div>`;
   const all = body.querySelector('#pgAll');
   const drawAll = () => {

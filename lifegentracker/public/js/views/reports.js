@@ -25,7 +25,7 @@ export async function renderReports({ main, query }) {
 
   main.innerHTML = html`
     <div class="page-header">
-      <div><h1>Reports</h1><p class="sub">Lifegen attendance for a week, month, quarter or year.</p></div>
+      <div><h1>Reports</h1></div>
       <div class="page-actions">
         <div class="filter-tabs" style="margin:0"><button class="active">Attendance</button><button id="toLgReport">Lifegroups</button></div>
         <button class="btn" id="printBtn">${icon('print')} Print / PDF</button>
@@ -140,7 +140,7 @@ export async function renderReports({ main, query }) {
           <div class="card__body">${raw(lineChart(r.weekly.map((w) => ({ label: shortSunday(w.service_date), value: w.present_count, title: fmtDate(w.service_date) })), { average: true }))}</div>
         </div>
         ${r.monthly.length > 1 ? html`<div class="card">
-          <div class="card__header"><h2>Monthly attendance</h2><span class="hint">Total present per month</span></div>
+          <div class="card__header"><h2>Monthly attendance</h2></div>
           <div class="card__body">${raw(barChart(r.monthly.map((m) => ({ label: fmtMonthShort(m.month), value: m.present, title: fmtMonth(m.month) })), { aria: 'Monthly attendance' }))}</div>
         </div>` : ''}
         <div class="card">
@@ -184,7 +184,7 @@ export async function renderReports({ main, query }) {
 async function renderLifegroupReport({ main }) {
   main.innerHTML = html`
     <div class="page-header">
-      <div><h1>Reports</h1><p class="sub">Network status, Lifegroup statistics and growth.</p></div>
+      <div><h1>Reports</h1></div>
       <div class="page-actions">
         <div class="filter-tabs" style="margin:0"><button id="toAtt">Attendance</button><button class="active">Lifegroups</button></div>
         <button class="btn" id="printBtn">${icon('print')} Print / PDF</button>
@@ -276,7 +276,7 @@ async function renderLifegroupReport({ main }) {
     </div>
 
     <div class="card">
-      <div class="card__header"><h2>Per Lifegroup</h2><span class="hint">active groups only</span></div>
+      <div class="card__header"><h2>Per Lifegroup</h2></div>
       <div class="table-wrap"><table class="table table--stack">
         <thead><tr><th>Network</th><th>Lifegroup</th><th>Leader</th><th class="num">Members</th><th class="num">Closed cell</th><th class="num">Open cell</th><th>Closed %</th><th class="num">Last 30 days</th></tr></thead>
         <tbody>${r.groups.map((g) => { const sg = solidOf(g); return html`<tr>

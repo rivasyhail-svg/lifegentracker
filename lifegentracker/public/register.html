@@ -19,7 +19,6 @@
         <span class="reg-app">LifegenTracker</span>
       </div>
       <h1>Lifegen Registration</h1>
-      <p class="reg-lead">Please complete the form below to register with Lifegen. It takes about a minute.</p>
       <ol class="reg-steps" aria-label="Progress">
         <li class="is-current" data-step-dot="1">Basic info</li>
         <li data-step-dot="2">Ministry &amp; leaders</li>
@@ -45,14 +44,12 @@
         <div class="field">
           <label for="full_name">Full name <span class="req" aria-hidden="true">*</span></label>
           <input class="input" id="full_name" name="full_name" type="text" autocomplete="name" autocapitalize="words" maxlength="120" required placeholder="e.g. Juan Dela Cruz" />
-          <span class="help">First name and last name — the way you want to be called.</span>
           <span class="error" data-error-for="full_name" role="alert"></span>
           <span class="alert alert--warn" id="nameWarn" hidden role="status">A person with this name is already registered. Please check your information — make sure the email below is yours. If it is you, you do not need to register again.</span>
         </div>
         <div class="field">
           <label for="email">Email / Gmail <span class="req" aria-hidden="true">*</span></label>
           <input class="input" id="email" name="email" type="email" inputmode="email" autocomplete="email" autocapitalize="off" spellcheck="false" maxlength="160" required placeholder="name@gmail.com" />
-          <span class="help">One email = one registration. We will only use it to reach you about Lifegen.</span>
           <span class="error" data-error-for="email" role="alert"></span>
         </div>
         <div class="field reg-age">
@@ -64,7 +61,6 @@
           <label for="school">School <span class="req" aria-hidden="true">*</span></label>
           <input class="input" id="school" name="school" type="text" list="schoolList" autocomplete="organization" autocapitalize="words" maxlength="120" required placeholder="e.g. Bulacan State University" />
           <datalist id="schoolList"></datalist>
-          <span class="help">If you are no longer studying, write your last school or “Working”.</span>
           <span class="error" data-error-for="school" role="alert"></span>
         </div>
         <!-- honeypot: hidden from humans, bots fill it -->
@@ -82,21 +78,31 @@
           <select class="select" id="ministry" name="ministry" required>
             <option value="">Choose a ministry…</option>
           </select>
-          <span class="help">Choose “Not yet in a ministry” if you are new.</span>
           <span class="error" data-error-for="ministry" role="alert"></span>
         </div>
         <div class="field">
           <label for="leader_name">Leader name <span class="req" aria-hidden="true">*</span></label>
-          <input class="input" id="leader_name" name="leader_name" type="text" list="leaderList" autocapitalize="words" autocomplete="off" maxlength="120" required placeholder="Your Lifegroup leader" />
-          <datalist id="leaderList"></datalist>
-          <span class="help">The leader who invited you or whom you talk to. Write “None yet” if you don’t have one.</span>
+          <div class="reg-pick" id="leaderPick" hidden>
+            <input class="input reg-pick__search" type="search" placeholder="Search your leader…" autocomplete="off" aria-label="Search your leader" />
+            <div class="reg-pick__list" role="listbox" aria-label="Tap your leader"></div>
+            <button type="button" class="reg-pick__other">Not on the list? Type the name</button>
+          </div>
+          <div class="reg-pick__manual" id="leaderManual">
+            <input class="input" id="leader_name" name="leader_name" type="text" list="leaderList" autocapitalize="words" autocomplete="off" maxlength="120" required placeholder="Your Lifegroup leader" />
+            <datalist id="leaderList"></datalist>
+          </div>
           <span class="error" data-error-for="leader_name" role="alert"></span>
         </div>
         <div class="field">
           <label for="network_leader_name">Network leader name <span class="req" aria-hidden="true">*</span></label>
-          <input class="input" id="network_leader_name" name="network_leader_name" type="text" list="networkLeaderList" autocapitalize="words" autocomplete="off" maxlength="120" required placeholder="Your leader's network leader" />
-          <datalist id="networkLeaderList"></datalist>
-          <span class="help">Not sure? Write “Not sure” and the team will fill it in.</span>
+          <div class="reg-pick" id="networkPick" hidden>
+            <div class="reg-pick__list" role="listbox" aria-label="Tap your network leader"></div>
+            <button type="button" class="reg-pick__other">Not on the list? Type the name</button>
+          </div>
+          <div class="reg-pick__manual" id="networkManual">
+            <input class="input" id="network_leader_name" name="network_leader_name" type="text" list="networkLeaderList" autocapitalize="words" autocomplete="off" maxlength="120" required placeholder="Your leader's network leader" />
+            <datalist id="networkLeaderList"></datalist>
+          </div>
           <span class="error" data-error-for="network_leader_name" role="alert"></span>
         </div>
         <div class="form-actions reg-actions">

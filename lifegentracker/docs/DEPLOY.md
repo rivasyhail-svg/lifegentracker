@@ -304,3 +304,21 @@ Enforced in three layers:
 - Now: opening a Network page (staff/admin) creates the leader's own Lifegroup once — **"<Network name> Leaders"** (same boys/girls type, in that Network, holds the cell leaders, max 6) — and the QR, Copy link, Link/print/New QR and Report a meeting all work immediately. Never duplicated; if the leader already leads a Lifegroup that one is used.
 - New endpoint `POST /api/networks/:id/leader-group` (lifegroups:manage) → `{ lifegroup_id, name, created }`; clear 400 messages when the Network has no registered leader or no boys/girls type (press Edit first).
 - QR-only change; nothing else touched. Version `v2026.10.10-3o`.
+
+## Update 3p — 2026-10-10 — QR form: tap-to-pick Leader & Network leader
+- Public `/register` step 2: "Leader name" and "Network leader name" now show the active leaders as tappable buttons
+  (name + Boys/Girls tag; cell leaders show their network leader). Tapping a leader fills both fields; the network
+  leader can still be changed. "Not on the list? Type the name" reveals the plain text box (e.g. "None yet").
+- `GET /api/public/register/options` adds `leader_options` and `network_leader_options` (names only — no ids/contacts).
+  Network leaders are not offered as "your leader" (their Lifegroup holds the cell leaders). Lists honour the
+  existing "Show leader names" (`qr_show_leaders`) setting; when off, the plain text boxes are used as before.
+- Nothing else changed: same field names, validation, review, submit, duplicate checks. On approval the person is
+  auto-placed in the chosen leader's Lifegroup as "new" (open cell), as before.
+- Files: src/services/registrations.js, public/register.html, public/js/register.js, public/css/register.css,
+  public/js/app.js, server.js, tests/api.test.js. Version `2026.10.10-3p`. Tests 79/79 (SQLite + Postgres).
+
+## Update 3q — 2026-10-10 — Cleaner UI: helper text removed
+- Removed explanatory helper sentences, page subtitles and tips across the app (Settings, Registrations/QR rules,
+  Lifegroups/Networks, Person form, Reports, History, Progress, the public `/register` form and the leader page).
+  Labels, buttons, data, error messages and empty states are unchanged. No functional change.
+- Files: public/js/views/*.js, public/js/lifegroup.js, public/register.html, public/js/app.js, server.js. Version `2026.10.10-3q`.

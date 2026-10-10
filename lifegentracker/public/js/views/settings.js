@@ -6,7 +6,7 @@ import { renderQrCard } from './registrations.js';
 export async function renderSettings({ main }) {
   const admin = can('users:manage');
   main.innerHTML = html`
-    <div class="page-header"><div><h1>Settings</h1><p class="sub">Your account${admin ? ', users, church details and data' : ''}.</p></div></div>
+    <div class="page-header"><div><h1>Settings</h1></div></div>
     ${state.authDisabled ? html`<div class="alert alert--warn mb-2">${icon('warn', 18)}<span><b>Sign-in is currently turned off</b> (open access mode). Everyone who opens this site is treated as Admin. Before using LifegenTracker with real church records, start the server with <code>LIFEGEN_AUTH=on</code> to require sign-in.</span></div>` : ''}
     <div class="grid grid--2" style="align-items:start">
       <div class="stack">
@@ -31,10 +31,10 @@ export async function renderSettings({ main }) {
     <div class="card__header"><h2>Security · my account</h2><span class="badge badge--${state.user.role_id}">${ROLE_LABELS[state.user.role_id]}</span></div>
     <div class="card__body">
       <p class="mb-2">Signed in as <b>${state.user.display_name}</b> (<span class="mono">${state.user.username}</span>).</p>
-      ${state.standalone ? '' : html`<div class="row row--between mb-2" style="gap:10px;flex-wrap:wrap"><span class="small muted">Sessions expire after 30 days of inactivity and are stored only as hashed tokens on the server. Passwords are stored hashed (scrypt) — never in the page, the QR or the URL.</span><button class="btn btn--sm" id="signOutBtn">${icon('logout', 14)} Sign out</button></div>`}
+      ${state.standalone ? '' : html`<div class="row row--between mb-2" style="gap:10px;flex-wrap:wrap"><span></span><button class="btn btn--sm" id="signOutBtn">${icon('logout', 14)} Sign out</button></div>`}
       <form id="pwForm" class="form-grid" novalidate>
         <div class="field span-2"><label>Current password</label><input name="current_password" type="password" autocomplete="current-password" required /></div>
-        <div class="field"><label>New password</label><input name="new_password" type="password" autocomplete="new-password" required /><span class="help">At least 8 characters.</span></div>
+        <div class="field"><label>New password</label><input name="new_password" type="password" autocomplete="new-password" required placeholder="At least 8 characters" /></div>
         <div class="field"><label>Confirm new password</label><input name="confirm" type="password" autocomplete="new-password" required /></div>
         <div class="span-2 form-actions"><button class="btn btn--primary" type="submit">Change password</button></div>
       </form>
@@ -69,10 +69,10 @@ export async function renderSettings({ main }) {
     <div class="card__header"><h2>Church details</h2></div>
     <div class="card__body"><form id="churchForm" class="form-grid" novalidate>
       <div class="field span-2"><label>Church name</label><input name="church_name" value="${state.settings.church_name}" required /></div>
-      <div class="field span-2"><label>Service name</label><input name="service_name" value="${state.settings.service_name}" required /><span class="help">Shown on the dashboard, attendance page and exports.</span></div>
+      <div class="field span-2"><label>Service name</label><input name="service_name" value="${state.settings.service_name}" required /></div>
       <div class="field span-2"><label>Church address <span class="opt">optional</span></label><input name="church_address" value="${state.settings.church_address || ''}" autocomplete="off" placeholder="Street, barangay, city" /></div>
       <div class="field"><label>Church contact <span class="opt">optional</span></label><input name="church_contact" value="${state.settings.church_contact || ''}" autocomplete="off" placeholder="Phone or email" /></div>
-      <div class="field"><label>Data privacy contact <span class="opt">optional</span></label><input name="privacy_contact" value="${state.settings.privacy_contact || ''}" autocomplete="off" placeholder="Name · email / phone" /><span class="help">Who members can ask about their data. Shown on the <a href="#/privacy">Privacy &amp; Terms</a> page.</span></div>
+      <div class="field"><label>Data privacy contact <span class="opt">optional</span></label><input name="privacy_contact" value="${state.settings.privacy_contact || ''}" autocomplete="off" placeholder="Name · email / phone" /></div>
       <div class="span-2 form-actions"><button class="btn btn--primary" type="submit">Save</button></div>
     </form></div>`;
   church.querySelector('#churchForm').onsubmit = async (e) => {
@@ -94,8 +94,8 @@ export async function renderSettings({ main }) {
     <div class="card__header"><h2>Attendance &amp; Lifegroup rules</h2></div>
     <div class="card__body"><form id="rulesForm" class="form-grid" novalidate>
       <div class="field span-2"><label class="toggle"><input type="checkbox" name="attendance_sunday_lock" ${lockOn ? 'checked' : ''} ${state.standalone ? 'disabled' : ''} /> Sunday-only attendance marking${state.standalone ? ' <span class="badge badge--nodot">Server only</span>' : ''}</label>
-        <span class="help">On: PRESENT can be tapped only on the actual Sunday (Philippine time). Past Sundays can be corrected by <b>Admins only</b>, and every correction asks for a reason that is kept in the audit log. Off: staff may mark any Sunday.</span></div>
-      <div class="field"><label>Solid Lifegroup target</label><input name="lifegroup_solid_target" type="number" min="1" max="50" value="${state.settings.lifegroup_solid_target || '6'}" required /><span class="help">A Lifegroup counts as <b>solid</b> once it has this many members tagged Solid.</span></div>
+        </div>
+      <div class="field"><label>Solid Lifegroup target</label><input name="lifegroup_solid_target" type="number" min="1" max="50" value="${state.settings.lifegroup_solid_target || '6'}" required /></div>
       <div class="span-2 form-actions"><button class="btn btn--primary" type="submit">Save</button></div>
     </form></div>`;
   rules.querySelector('#rulesForm').onsubmit = async (e) => {
@@ -115,8 +115,7 @@ export async function renderSettings({ main }) {
     qrCard.innerHTML = html`
       <div class="card__header"><h2>QR registration</h2><span class="badge badge--nodot">Server only</span></div>
       <div class="card__body stack">
-        <p class="small">QR self-registration lets visitors register from their own phones. That needs the <b>server deployment</b> (Node.js + SQLite) so every phone writes to one shared database.</p>
-        <p class="small muted">This standalone build stores data only in this browser, so it cannot receive registrations from other devices — the feature is not offered here to avoid pretending otherwise. Run <code>node server.js</code> (see README) to use it.</p>
+        <p class="small muted">Available on the server deployment only.</p>
       </div>`;
   } else {
     renderQrCard(qrCard);
@@ -151,8 +150,8 @@ export async function renderSettings({ main }) {
         <div class="field"><label>Display name <span class="req">*</span></label><input name="display_name" value="${u ? u.display_name.replace(/"/g, '&quot;') : ''}" required /></div>
         <div class="field"><label>Email <span class="opt">optional</span></label><input name="email" type="email" value="${u && u.email ? u.email.replace(/"/g, '&quot;') : ''}" autocomplete="off" /></div>
         <div class="field"><label>Role <span class="req">*</span></label><select name="role_id" ${isSelf ? 'disabled' : ''}>${Object.entries(ROLE_LABELS).map(([k, l]) => `<option value="${k}" ${(u ? u.role_id : 'staff') === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
-        <div class="field"><label>${u ? 'New password' : 'Password'} ${u ? '<span class="opt">leave blank to keep</span>' : '<span class="req">*</span>'}</label><input name="password" type="password" autocomplete="new-password" /><span class="help">At least 8 characters.</span></div>
-        ${u && !isSelf ? `<div class="field span-2"><label class="toggle"><input type="checkbox" name="is_active" ${u.is_active ? 'checked' : ''}/> Account is active</label><span class="help">Deactivated users are signed out immediately and cannot sign in.</span></div>` : ''}
+        <div class="field"><label>${u ? 'New password' : 'Password'} ${u ? '<span class="opt">leave blank to keep</span>' : '<span class="req">*</span>'}</label><input name="password" type="password" autocomplete="new-password" placeholder="At least 8 characters" /></div>
+        ${u && !isSelf ? `<div class="field span-2"><label class="toggle"><input type="checkbox" name="is_active" ${u.is_active ? 'checked' : ''}/> Account is active</label></div>` : ''}
       </form>`,
       footer: `<button class="btn" data-close>Cancel</button><button class="btn btn--primary" id="saveUser">${u ? 'Save' : 'Create user'}</button>`,
     });
@@ -181,7 +180,7 @@ export async function renderSettings({ main }) {
     demoCard.innerHTML = html`
       <div class="card__header"><h2>Sample / demo data</h2>${d.loaded ? raw('<span class="badge badge--demo">Loaded</span>') : ''}</div>
       <div class="card__body">
-        <p class="small muted mb-2">Load clearly-labelled sample records (“Demo Person 01…24” across the last 10 Sundays) to explore the dashboard and reports before real registrations begin. Demo records are tagged and can be removed completely at any time. Do not mix demo data with live church records.</p>
+        <p class="small muted mb-2">Sample records, clearly tagged. Do not mix with live church records.</p>
         ${d.loaded
           ? html`<div class="row"><span class="small">${d.people} demo people · ${d.services} demo Sundays</span><button class="btn btn--danger-ghost" id="demoRemove" style="margin-left:auto">${icon('trash')} Remove demo data</button></div>`
           : html`<button class="btn" id="demoLoad">Load demo data</button>`}
@@ -206,10 +205,9 @@ export async function renderSettings({ main }) {
     backupCard.innerHTML = html`
       <div class="card__header"><h2>Backup &amp; restore</h2>${last ? html`<span class="hint">Last snapshot ${fmtDateTime(last.created_at)}</span>` : ''}</div>
       <div class="card__body">
-        <p class="small muted mb-2">The server keeps an automatic daily copy of the database (last 14 kept in <span class="mono">data/backups/</span>). Download a backup file before major changes and keep it somewhere safe (e.g. Google Drive).</p>
         <div class="row" style="flex-wrap:wrap;gap:8px">
           <button class="btn btn--primary" id="backupDownload">${icon('download')} Download backup</button>
-          ${snaps.supported === false ? html`<span class="small muted">Hosted database — file snapshots are kept by the database provider; download the JSON backup regularly.</span>` : html`<button class="btn" id="backupSnapshot">Snapshot now</button>`}
+          ${snaps.supported === false ? html`<span class="small muted">Hosted database — download the JSON backup regularly.</span>` : html`<button class="btn" id="backupSnapshot">Snapshot now</button>`}
           <button class="btn btn--danger-ghost" id="backupRestore" style="margin-left:auto">${icon('upload')} Restore from file…</button>
           <input type="file" id="restoreInput" accept="application/json,.json" hidden />
         </div>
@@ -278,7 +276,7 @@ export async function renderSettings({ main }) {
   // ----- System --------------------------------------------------------------
   const sys = await api.system();
   main.querySelector('#systemCard').innerHTML = html`
-    <div class="card__header"><h2>System</h2><span class="hint">LifegenTracker v1 · Phase 1</span></div>
+    <div class="card__header"><h2>System</h2></div>
     <div class="card__body">
       <dl class="dl">
         <div><dt>People</dt><dd>${sys.counts.people}</dd></div>
@@ -288,8 +286,6 @@ export async function renderSettings({ main }) {
         <div><dt>Archived people</dt><dd>${sys.counts.archived ?? 0}</dd></div>
         <div><dt>Sign-in</dt><dd>${sys.auth_disabled ? raw('<span style="color:#b45309">Off (open access)</span>') : 'On'}</dd></div>
         <div style="grid-column:1/-1"><dt>Database file</dt><dd class="small mono" style="word-break:break-all">${sys.db_file}</dd></div>
-        <div style="grid-column:1/-1"><dt>Schema migrations</dt><dd class="small">${sys.migrations.map((m) => m.version).join(', ')}</dd></div>
       </dl>
-      <p class="small muted mt-2">Future phases (Cell Groups, LifeClass, Discipleship, Ministries) will be added as new migrations without rebuilding existing data.</p>
     </div>`;
 }

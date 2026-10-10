@@ -9,7 +9,7 @@ export async function renderHistory({ main, query }) {
 
   main.innerHTML = html`
     <div class="page-header">
-      <div><a class="small" href="#/attendance">${icon('back', 14)} Attendance</a><h1 class="mt-1">Attendance History</h1><p class="sub">Every recorded Lifegen Sunday. Click a date to see who was there.</p></div>
+      <div><a class="small" href="#/attendance">${icon('back', 14)} Attendance</a><h1 class="mt-1">Attendance History</h1></div>
       <div class="page-actions">
         <select id="yearSel" style="width:auto"><option value="">All years</option>${years.map((y) => html`<option value="${y}" ${String(y) === year ? 'selected' : ''}>${y}</option>`)}</select>
         <button class="btn" id="exportBtn">${icon('download')} Export CSV</button>
@@ -75,7 +75,7 @@ export async function renderServiceDetail({ main }, id) {
         <div class="card__body card__body--flush" id="listBody"></div>
       </div>
       <div class="card">
-        <div class="card__header"><h2>Change log</h2><span class="hint">Who recorded what</span></div>
+        <div class="card__header"><h2>Change log</h2></div>
         <div class="card__body card__body--flush" style="max-height:560px;overflow:auto">
           ${audit.length ? html`<ul class="timeline" style="padding:4px 20px">${audit.map((a) => html`<li>
             <span style="flex:1;min-width:0"><b>${a.first_name ? `${a.first_name} ${a.last_name}` : 'Deleted person'}</b> <span class="muted small">${a.person_code || ''}</span><br>

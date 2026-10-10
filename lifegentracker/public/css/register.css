@@ -44,3 +44,18 @@
 @media (min-width: 600px) { .reg-wrap { padding-top: 40px; } .reg-step { padding: 26px 26px 22px; } }
 @media (prefers-reduced-motion: no-preference) { .reg-step { animation: regIn .18s ease-out; } @keyframes regIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } } }
 .field #nameWarn { font-size: .8rem; }
+
+/* Tap-to-pick leader / network leader (names only) */
+.reg-pick { display: flex; flex-direction: column; gap: 8px; }
+.reg-pick__list { display: flex; flex-direction: column; gap: 6px; max-height: 262px; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 6px; background: #fff; }
+.reg-pick__opt { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; text-align: left; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: #fff; font: inherit; font-size: .95rem; color: var(--ink-900); cursor: pointer; min-height: 44px; }
+.reg-pick__opt:active { background: var(--brand-50); }
+.reg-pick__opt.is-selected { border-color: var(--accent); background: var(--brand-50); box-shadow: inset 0 0 0 1px var(--accent); }
+.reg-pick__opt b { font-weight: 600; }
+.reg-pick__opt .reg-pick__sub { display: block; font-size: .76rem; color: var(--muted); font-weight: 400; margin-top: 1px; }
+.reg-pick__tag { flex: 0 0 auto; font-size: .7rem; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: var(--ink-100, #f1f5f9); color: var(--ink-600); }
+.reg-pick__tag--boys { background: #dbeafe; color: #1d4ed8; }
+.reg-pick__tag--girls { background: #fce7f3; color: #be185d; }
+.reg-pick__empty { padding: 10px 12px; font-size: .86rem; color: var(--muted); }
+.reg-pick__other { align-self: flex-start; background: none; border: 0; padding: 2px 0; font: inherit; font-size: .82rem; color: var(--brand-700); text-decoration: underline; cursor: pointer; }
+.reg-pick__manual[hidden] { display: none; }

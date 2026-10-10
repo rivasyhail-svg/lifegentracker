@@ -36,7 +36,6 @@ export function personFormHtml(p = {}, { compact = false, defaults = {} } = {}) 
   return html`
     <div class="form-section">
       <h3>Required</h3>
-      <p class="desc">Only these three fields are needed to register someone.</p>
       <div class="form-grid">
         ${field('first_name', 'First name', { required: true, autocomplete: 'given-name' })}
         ${field('last_name', 'Last name', { required: true, autocomplete: 'family-name' })}
@@ -47,7 +46,6 @@ export function personFormHtml(p = {}, { compact = false, defaults = {} } = {}) 
     </div>
     <div class="form-section">
       <h3>Optional</h3>
-      <p class="desc">Can be filled in now or completed later from the profile.</p>
       <div class="photo-picker mb-2">
         <span class="avatar avatar--lg" id="photoPreview">${p?.photo ? raw(`<img src="${p.photo}" alt="" />`) : (p?.first_name ? initials(p) : raw(icon('user', 28).value))}</span>
         <div>
@@ -67,15 +65,15 @@ export function personFormHtml(p = {}, { compact = false, defaults = {} } = {}) 
         ${field('email', 'Email', { type: 'email', autocomplete: 'email' })}
         ${field('address', 'Address', { span: true, autocomplete: 'street-address' })}
         <div class="field span-2"><label class="toggle" for="f_privacy_consent"><input type="checkbox" id="f_privacy_consent" name="privacy_consent" value="1" ${p?.privacy_consent_at ? 'checked' : ''} /> The person agreed that Lifegen keeps their details for attendance and Lifegroup follow-up</label>
-          <span class="help">Data privacy consent (Data Privacy Act of 2012). ${p?.privacy_consent_at ? `Recorded ${p.privacy_consent_at}.` : 'Tick it once they say yes — it can be added later.'} Details are used only for church follow-up, never shared. <a href="#/privacy" target="_blank" rel="noopener">Privacy notice</a></span></div>
+          <span class="help">${p?.privacy_consent_at ? `Recorded ${p.privacy_consent_at}. ` : ''}<a href="#/privacy" target="_blank" rel="noopener">Privacy notice</a></span></div>
         ${compact ? '' : html`
         ${field('school', 'School')}
         ${field('course_year', 'Course / Year level', { placeholder: 'e.g. BS Nursing – 2nd Year' })}
-        ${field('age', 'Age', { type: 'number', placeholder: '18', help: 'Only if the birthday is unknown (5–100).' })}
+        ${field('age', 'Age', { type: 'number', placeholder: '18' })}
         ${field('ministry', 'Ministry', { placeholder: 'e.g. Ushering' })}
         ${field('occupation', 'Occupation')}
         ${field('date_registered', 'Date registered', { type: 'date' })}
-        ${field('date_first_attended', 'Date first attended', { type: 'date', help: 'Set automatically on the first recorded Sunday if left blank.' })}
+        ${field('date_first_attended', 'Date first attended', { type: 'date' })}
         ${field('notes', 'Notes', { type: 'textarea', span: true })}`}
       </div>
     </div>`;
@@ -165,7 +163,7 @@ export async function renderPersonForm({ main, query }, id) {
       <div>
         <a class="small" href="${editing ? `#/people/${id}` : '#/people'}">${icon('back', 14)} ${editing ? 'Back to profile' : 'Back to people'}</a>
         <h1 class="mt-1">${editing ? `Edit ${person.first_name} ${person.last_name}` : 'Add person'}</h1>
-        <p class="sub">${editing ? person.person_code : 'A Person ID (e.g. LG-2026-0001) is generated automatically.'}</p>
+        ${editing ? html`<p class="sub">${person.person_code}</p>` : ''}
       </div>
     </div>
     <form id="personForm" class="card" novalidate>

@@ -50,6 +50,19 @@ function publicOptions(db, { token, device_id } = {}) {
     out.network_leaders = db.prepare(`SELECT DISTINCT COALESCE(lp.first_name || ' ' || lp.last_name, n.leader_name) AS v
         FROM networks n LEFT JOIN people lp ON lp.id = n.leader_person_id
        WHERE n.is_active = 1 AND (n.leader_person_id IS NOT NULL OR n.leader_name IS NOT NULL) `).all().map((r) => r.v).filter(Boolean).sort(ci);
+    // Tap-to-pick lists (names only — no ids, no contact details). Leaders = cell leaders with an open cell
+    // (network leaders' own Lifegroups hold the cell leaders, so they are not offered as "your leader").
+    out.leader_options = db.prepare(`SELECT DISTINCT COALESCE(lp.first_name || ' ' || lp.last_name, g.leader_name) AS name, g.gender,
+          COALESCE(np.first_name || ' ' || np.last_name, n.leader_name) AS network_leader
+        FROM lifegroups g LEFT JOIN people lp ON lp.id = g.leader_person_id
+        LEFT JOIN networks n ON n.id = g.network_id LEFT JOIN people np ON np.id = n.leader_person_id
+       WHERE g.is_active = 1 AND (g.leader_person_id IS NOT NULL OR g.leader_name IS NOT NULL)
+         AND NOT EXISTS (SELECT 1 FROM networks xn WHERE xn.leader_person_id = g.leader_person_id AND xn.is_active = 1)`).all()
+      .filter((r) => r.name).map((r) => ({ name: r.name, gender: r.gender || null, network_leader: r.network_leader || null })).sort((a, b) => ci(a.name, b.name));
+    out.network_leader_options = db.prepare(`SELECT DISTINCT COALESCE(lp.first_name || ' ' || lp.last_name, n.leader_name) AS name, n.gender
+        FROM networks n LEFT JOIN people lp ON lp.id = n.leader_person_id
+       WHERE n.is_active = 1 AND (n.leader_person_id IS NOT NULL OR n.leader_name IS NOT NULL)`).all()
+      .filter((r) => r.name).map((r) => ({ name: r.name, gender: r.gender || null })).sort((a, b) => ci(a.name, b.name));
   }
   return out;
 }

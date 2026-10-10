@@ -49,7 +49,7 @@ export async function renderRegistrations({ main, query }) {
   const filters = { status: ['pending', 'approved', 'rejected', 'all'].includes(query.status) ? query.status : 'pending', q: query.q || '' };
   main.innerHTML = html`
     <div class="page-header">
-      <div><h1>Registrations</h1><p class="sub">People who registered through the QR code. Approve to add them to People.</p></div>
+      <div><h1>Registrations</h1></div>
       <div class="page-actions"><a class="btn" href="#/settings?section=qr">${icon('qr')} QR code &amp; rules</a></div>
     </div>
     <div class="toolbar">
@@ -78,7 +78,7 @@ export async function renderRegistrations({ main, query }) {
         el.querySelector('#resumeBtn').onclick = (e) => withLoading(e.currentTarget, async () => { try { await api.registrationResume(); toast('Registration resumed.'); showGuardBanner(); } catch (err) { toast(err.message, 'error'); } });
       } else if (!g.open_now) {
         const why = g.closed_reason === 'window' ? `closed until ${g.window_label} (church time now: ${g.church_time})` : g.closed_reason === 'disabled' ? 'switched off in Settings' : g.closed_reason;
-        el.innerHTML = html`<p class="small muted" style="margin:-6px 0 14px">The public form is currently <b>${why}</b>. New registrations only come in while it is open.</p>`;
+        el.innerHTML = html`<p class="small muted" style="margin:-6px 0 14px">The public form is currently <b>${why}</b>.</p>`;
       } else el.innerHTML = '';
     } catch { /* banner is best-effort */ }
   }
@@ -152,17 +152,16 @@ export async function renderRegistrations({ main, query }) {
 
 const BLOCK_OPTS = (showIp = true) => html`
   <fieldset class="stack" style="border:0;padding:0;margin:0;gap:6px">
-    <legend class="small" style="font-weight:600;margin-bottom:4px">Also block (stops them from registering again)</legend>
+    <legend class="small" style="font-weight:600;margin-bottom:4px">Also block</legend>
     <label class="toggle"><input type="checkbox" name="block_email" /><span>This email address</span></label>
     <label class="toggle"><input type="checkbox" name="block_device" /><span>This phone / browser <span class="muted">(same-device lock)</span></span></label>
-    ${showIp ? html`<label class="toggle"><input type="checkbox" name="block_ip" /><span>This network / IP <span class="muted">— careful: the church Wi-Fi is shared by everyone</span></span></label>` : ''}
+    ${showIp ? html`<label class="toggle"><input type="checkbox" name="block_ip" /><span>This network / IP </span></label>` : ''}
   </fieldset>`;
 
 function bulkRejectDialog(ids, done) {
   const modal = openModal({
     title: `Reject ${ids.length} registration${ids.length === 1 ? '' : 's'}`,
     body: html`<form id="bulkForm" class="stack" novalidate>
-      <p class="small">Use this for troll bursts and obvious fakes. The rows move to Rejected (they stay visible for the audit trail) and none of them reach People.</p>
       <div class="field"><label>Reason <span class="opt">optional</span></label><input name="note" maxlength="200" placeholder="e.g. spam burst / fake names" /></div>
       ${BLOCK_OPTS(false)}
     </form>`.toString(),
@@ -207,13 +206,12 @@ async function openRegistration(id, reload, opts = {}) {
             <div class="row" style="gap:8px">${icon('warn', 18)}<b>Same name already in People — is this the same person?</b></div>
             ${rv.same_name.map((p) => html`<div class="row row--between" style="gap:8px;width:100%"><span><a href="#/people/${p.id}">${p.first_name} ${p.last_name}</a> <span class="code">${p.person_code}</span> · ${p.email || 'no email'} · ${p.school || ''}</span>
               ${!p.email || p.email.toLowerCase() === r.email.toLowerCase() ? html`<button class="btn btn--sm" data-link="${p.id}">${icon('link', 14)} Link to this person</button>` : html`<span class="small muted">different email</span>`}</div>`)}
-            <span class="small">“Link” fills the blanks of the existing record (email, school, age, ministry) instead of creating a duplicate. “Approve” creates a new person.</span>
           </div>` : ''}
         ${r.status === 'approved' ? html`<p class="small">${icon('check', 14)} Approved${r.reviewed_by_name ? ` by ${r.reviewed_by_name}` : ''} → <a href="#/people/${r.person_id}">${r.person_code || 'person record'}</a>${r.lifegroup_name ? html` · Lifegroup <a href="#/lifegroups/${r.lifegroup_id}">${r.lifegroup_name}</a>` : html` · <a href="#/people/${r.person_id}">Needs Lifegroup — assign from the profile</a>`}</p>` : ''}
         ${pending && rv.matching_groups && rv.matching_groups.length ? html`<p class="small muted">Leader “${r.leader_name}” matches Lifegroup ${rv.matching_groups.map((g) => html`<a href="#/lifegroups/${g.id}">${g.name}</a>`)} — on approve they are placed there automatically (open cell).</p>` : ''}
         ${pending ? html`<div class="field"><label for="approveStatus">Status after approval</label>
           <select id="approveStatus" style="max-width:260px"><option value="first_timer">First Timer (default)</option><option value="returning">Returning</option><option value="regular">Regular</option></select>
-          <span class="help">Contact number is not asked on the QR form — staff can add it on the person's profile later.</span></div>` : ''}
+</div>` : ''}
       </div>`,
     footer: html`
       <div class="row" style="gap:8px;flex-wrap:wrap;width:100%">
@@ -252,7 +250,6 @@ function rejectDialog(r, reload) {
   const modal = openModal({
     title: 'Reject registration', subtitle: `${r.full_name} · ${r.ref_code}`,
     body: html`<form id="rejectForm" class="stack" novalidate>
-      <p class="small">The person will not be added to People. The row stays in the Rejected list so you can see why later.</p>
       <div class="field"><label>Reason <span class="opt">optional</span></label><input name="note" maxlength="200" placeholder="e.g. Duplicate of LG-2026-0012 / test entry" /></div>
       ${BLOCK_OPTS(true)}
     </form>`.toString(),
@@ -318,7 +315,6 @@ export async function renderQrCard(card) {
           ? html`<p class="small"><b>Rotating QR</b> — this code works only until <b>Sunday ${qr.valid_through}</b>. Print a fresh one every week (or tap “New QR code” to invalidate the current print immediately). The QR still contains only a link — never personal data.</p>`
           : html`<p class="small"><b>Reusable QR</b> — print it once and post it at the venue. The QR contains only this link, never personal data. Changing the rules below does not change the QR, so the same print keeps working.</p>`}
         <div class="qr-url" id="qrUrl">${qr.url}</div>
-        ${!qr.custom_url ? html`<span class="small muted">This is the address people are using right now. If the app is reached through a different domain, set the public URL below so the QR points there.</span>` : ''}
         <div class="row" style="gap:8px;flex-wrap:wrap">
           <button class="btn btn--sm" id="qrCopy">${icon('copy', 14)} Copy link</button>
           <button class="btn btn--sm" id="qrPng">${icon('download', 14)} Download PNG</button>
@@ -331,29 +327,28 @@ export async function renderQrCard(card) {
     <hr class="sep" />
     <form id="qrRules" class="stack" novalidate>
       <h3 style="font-size:.95rem">Registration rules</h3>
-      <label class="toggle" style="align-items:flex-start"><input type="checkbox" name="qr_registration_enabled" ${on('qr_registration_enabled') ? 'checked' : ''} /><span>Allow new registrations<br><span class="small muted">Off = the form shows “Registration is currently unavailable”.</span></span></label>
-      <label class="toggle" style="align-items:flex-start"><input type="checkbox" name="qr_require_approval" ${on('qr_require_approval') ? 'checked' : ''} /><span>Require admin approval before adding to People<br><span class="small muted">Recommended. Off = each registration becomes a person immediately.</span></span></label>
-      <label class="toggle" style="align-items:flex-start"><input type="checkbox" name="qr_name_duplicate_check" ${on('qr_name_duplicate_check') ? 'checked' : ''} /><span>Flag same-name registrations for review<br><span class="small muted">Email uniqueness is always enforced regardless (Gmail dots and +tags count as the same inbox).</span></span></label>
-      <label class="toggle" style="align-items:flex-start"><input type="checkbox" name="qr_show_leaders" ${on('qr_show_leaders') ? 'checked' : ''} /><span>Suggest active leader names on the form<br><span class="small muted">Names only — no contact details.</span></span></label>
+      <label class="toggle" style="align-items:flex-start"><input type="checkbox" name="qr_registration_enabled" ${on('qr_registration_enabled') ? 'checked' : ''} /><span>Allow new registrations</span></label>
+      <label class="toggle" style="align-items:flex-start"><input type="checkbox" name="qr_require_approval" ${on('qr_require_approval') ? 'checked' : ''} /><span>Require admin approval before adding to People</span></label>
+      <label class="toggle" style="align-items:flex-start"><input type="checkbox" name="qr_name_duplicate_check" ${on('qr_name_duplicate_check') ? 'checked' : ''} /><span>Flag same-name registrations for review</span></label>
+      <label class="toggle" style="align-items:flex-start"><input type="checkbox" name="qr_show_leaders" ${on('qr_show_leaders') ? 'checked' : ''} /><span>Show leader names on the form</span></label>
 
       <h3 style="font-size:.95rem;margin-top:8px">Anti-fake protection</h3>
       <div class="form-grid">
         <div class="field"><label>QR mode</label>
           <select name="qr_mode"><option value="reusable" ${!rotating ? 'selected' : ''}>Reusable — one print, works every week</option><option value="rotating" ${rotating ? 'selected' : ''}>Rotating — new code every week (Mon–Sun)</option></select>
-          <span class="help">Rotating stops photos of the poster from being reused later. Use the Print poster button each week.</span></div>
+</div>
         <div class="field"><label>When the form is open</label>
           <select name="qr_window"><option value="sunday" ${g.window === 'sunday' ? 'selected' : ''}>Sundays only, between the times below</option><option value="always" ${g.window === 'always' ? 'selected' : ''}>Always open</option></select>
           <span class="help">Church time zone: <code>${g.timezone}</code> · now ${g.church_time}</span></div>
         <div class="field"><label>Opens at</label><input name="qr_window_start" type="time" value="${g.window_start}" required /></div>
         <div class="field"><label>Closes at</label><input name="qr_window_end" type="time" value="${g.window_end}" required /></div>
-        <div class="field span-2"><label class="toggle" style="align-items:flex-start"><input type="checkbox" name="qr_device_lock" ${g.device_lock ? 'checked' : ''} /><span>One registration per phone / browser<br><span class="small muted">The second attempt from the same phone shows the earlier reference instead of creating another entry. Rejected entries free the phone again.</span></span></label></div>
-        <div class="field"><label>Auto-pause after</label><div class="row" style="gap:8px;align-items:center"><input name="qr_hourly_cap" type="number" min="0" max="9999" step="1" value="${g.hourly_cap}" style="max-width:110px" /><span class="small muted">submissions per hour (0 = off). Last hour: <b>${g.last_hour}</b></span></div></div>
-        <div class="field"><label>Per-network limit</label><div class="row" style="gap:8px;align-items:center"><input name="qr_ip_daily_cap" type="number" min="0" max="9999" step="1" value="${g.ip_daily_cap}" style="max-width:110px" /><span class="small muted">per IP per day (church Wi-Fi is shared — keep it generous; 0 = off)</span></div></div>
+        <div class="field span-2"><label class="toggle" style="align-items:flex-start"><input type="checkbox" name="qr_device_lock" ${g.device_lock ? 'checked' : ''} /><span>One registration per phone / browser</span></label></div>
+        <div class="field"><label>Auto-pause after</label><div class="row" style="gap:8px;align-items:center"><input name="qr_hourly_cap" type="number" min="0" max="9999" step="1" value="${g.hourly_cap}" style="max-width:110px" /><span class="small muted">per hour · last hour: <b>${g.last_hour}</b></span></div></div>
+        <div class="field"><label>Per-network limit</label><div class="row" style="gap:8px;align-items:center"><input name="qr_ip_daily_cap" type="number" min="0" max="9999" step="1" value="${g.ip_daily_cap}" style="max-width:110px" /><span class="small muted">per IP per day</span></div></div>
       </div>
-      <p class="small muted" style="margin:0">Always on: real-name checks (no “test”, “asdf”, repeated letters, one-word names), temporary-email domains rejected, mistyped domains (gmail.con) caught, a form that was open for less than a few seconds is refused, per-IP rate limit, honeypot field.</p>
 
-      <div class="field"><label>Ministry choices</label><textarea name="qr_ministries" rows="5" placeholder="One per line">${String(s.qr_ministries || '').split(/[,\n]/).map((x) => x.trim()).filter(Boolean).join('\n')}</textarea><span class="help">Shown as the Ministry dropdown on the form.</span></div>
-      <div class="field"><label>Public URL <span class="opt">optional</span></label><input name="qr_public_url" value="${s.qr_public_url || ''}" placeholder="https://lifegen.yourchurch.org" autocomplete="off" /><span class="help">Only needed when the address above is not the one people will use (e.g. a custom domain). <code>/register</code> is added automatically.</span></div>
+      <div class="field"><label>Ministry choices</label><textarea name="qr_ministries" rows="5" placeholder="One per line">${String(s.qr_ministries || '').split(/[,\n]/).map((x) => x.trim()).filter(Boolean).join('\n')}</textarea></div>
+      <div class="field"><label>Public URL <span class="opt">optional</span></label><input name="qr_public_url" value="${s.qr_public_url || ''}" placeholder="https://lifegen.yourchurch.org" autocomplete="off" /></div>
       <div class="form-actions"><button class="btn btn--primary" type="submit">Save rules</button></div>
     </form>
     <hr class="sep" />
@@ -407,7 +402,6 @@ async function renderBlocklist(box) {
   try { items = (await api.registrationBlocks()).items; } catch (err) { box.innerHTML = html`<div class="alert alert--error">${err.message}</div>`; return; }
   box.innerHTML = html`
     <h3 style="font-size:.95rem">Blocklist <span class="muted" style="font-weight:400">(${items.length})</span></h3>
-    <p class="small muted" style="margin-top:0">Blocked emails, domains, phones and networks cannot submit the form — they see a generic “please approach the team” message. Phones and networks are added from a registration’s Reject dialog; emails and domains can also be added here.</p>
     <form id="blockAdd" class="row" style="gap:8px;flex-wrap:wrap;align-items:flex-end" novalidate>
       <div class="field" style="margin:0"><label>Type</label><select name="kind"><option value="email">Email</option><option value="domain">Email domain</option></select></div>
       <div class="field grow" style="margin:0;min-width:200px"><label>Value</label><input name="value" placeholder="name@gmail.com or example.com" autocomplete="off" required /></div>
@@ -440,7 +434,7 @@ export async function renderQrPoster({ main }) {
   document.body.classList.add('printing-poster');
   main.innerHTML = html`
     <div class="page-header no-print">
-      <div><h1>Print QR poster</h1><p class="sub">A4 / Letter. Print or save as PDF from the browser dialog.</p></div>
+      <div><h1>Print QR poster</h1></div>
       <div class="page-actions"><a class="btn" href="#/settings?section=qr">${icon('back')} Back</a><button class="btn btn--primary" data-action="print">${icon('print')} Print</button></div>
     </div>
     <div class="qr-poster">
@@ -451,7 +445,6 @@ export async function renderQrPoster({ main }) {
       <div class="qr-poster__code" aria-label="QR code to the registration form">${raw(qr.svg)}</div>
       <p><b>Scan to Register</b></p>
       <p>Register your basic information with Lifegen.</p>
-      <p class="small muted">Please complete the registration form on your phone.</p>
       <p class="qr-poster__url">${qr.url}</p>
       ${qr.valid_through ? html`<p class="small muted">This code is valid until Sunday, ${qr.valid_through}. Registration opens during Lifegen service.</p>` : ''}
       <div class="qr-poster__foot">${state.settings.service_name} · Sundays</div>

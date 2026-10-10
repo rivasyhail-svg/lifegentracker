@@ -17,7 +17,7 @@ import { renderLifegroups, renderLifegroup, renderNetwork } from './views/lifegr
 import { renderRegistrations, renderQrPoster, refreshPendingBadge } from './views/registrations.js';
 
 /** Shown in the sidebar so everyone can tell which build is running. Bump on every release. */
-export const APP_VERSION = '2026.10.10-3o';
+export const APP_VERSION = '2026.10.10-3q';
 
 export const state = {
   user: null,
