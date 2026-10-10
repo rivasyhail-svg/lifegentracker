@@ -246,3 +246,19 @@ Network leader's QR page now has two tabs only: **My cell leaders** (names + the
 
 ### 2026-10-10 update 3f — cell leader tracking on the network leader page
 In **My cell leaders**, each name now shows a badge for *their* Lifegroup this week (**Held LG** / **No LG** / **No report**) next to the dots (present in the network leader's Lifegroup). Tapping the name shows "Their Lifegroup · n/4 held" (4-week strip) and **Who was present** — the last 4 reports with the names present or the no-meeting reason — above their Open / Closed cell. Public network view now includes `recent` per group (names only, no contact details).
+
+## Update 3g — admin Lifegroup detail follows the church structure (2026-10-10)
+- Capacity field removed from the Lifegroup form; the `capacity` column is ignored everywhere.
+- Network leader's Lifegroup: tiles show **Cell leaders n/6** + **Their Lifegroups k (x solid)**; the Members card becomes a **Cell leaders** table (presence dots, their Lifegroup, members, Closed cell x/6, Open cell, last held, Remove).
+- Regular Lifegroup: tiles **Members · Closed cell x/6 (green when solid) · Open cell (no limit) · Schedule**; Members card = Open cell (left) / Closed cell (right).
+- API: `GET /api/lifegroups/:id` now also returns `led_groups` and `solid_target`; `max_members` is 6 for network-leader groups, otherwise null.
+- Tests 78/78 on SQLite and Postgres. Upload the same way as before (update zip → GitHub upload → Commit to main → top Vercel row Ready → Ctrl+F5).
+
+## Update 3h — click a cell leader to see their Open / Closed cell (2026-10-10)
+- Admin detail of a network leader's Lifegroup: clicking a row in the **Cell leaders** table expands that leader's own Lifegroup — Open cell (left) / Closed cell (right) with 4-week dots. Staff can move members between cells right there (closed-cell cap of 6 still enforced); the summary row updates in place. Click again to collapse.
+- Front-end only (public/js, public/css); no DB or API changes.
+
+## Update 3i — Network QR per Network + simplified Lifegroup report tiles (2026-10-10)
+- **Network page (`#/networks/:id`)**: top buttons **Report a meeting** and **Network QR**, plus a "Network QR" card under the title showing the QR of that Network only (link = the network leader's permanent leader link). Copy link / Print / **New QR** (resets the token so an old, leaked QR stops working). Every Network gets its QR automatically as soon as its leader leads a Lifegroup — nothing to set up.
+- **Reports → Lifegroups**: the headline tiles are now two sections, **Boys** and **Girls**, each with only Networks · Cell leaders · Open cell · Closed cell (cell leaders = members of a network leader's Lifegroup; open/closed counts are from the ordinary Lifegroups).
+- API: `GET /api/reports/network-status` adds `structure.{boys,girls}` = { networks, cell_leaders, lifegroups, open_cell, closed_cell, members }. Tests 78/78 on SQLite and Postgres.

@@ -49,7 +49,7 @@ function shape(g, user) {
     network: g.network_name || g.network, // display name (legacy free-text kept as fallback)
     time_bucket: timeBucket(g.schedule_time),
     leads_network: Boolean(Number(g.leads_network)),
-    max_members: Number(g.leads_network) ? (g.capacity != null ? Math.min(g.capacity, prog.NETWORK_LEADER_MAX) : prog.NETWORK_LEADER_MAX) : g.capacity,
+    max_members: Number(g.leads_network) ? prog.NETWORK_LEADER_MAX : null, // open cell has no limit; capacity column is no longer used
   };
   out.slots = out.max_members == null ? null : Math.max(out.max_members - g.member_count, 0);
   if (!can(user, 'people:view_private')) out.leader_contact = undefined;
@@ -195,7 +195,7 @@ router.get('/overview', requirePermission('dashboard:view'), wrap((req, res) => 
 
 function overview(db) {
   const g = db.prepare(`SELECT COUNT(*) AS total, SUM(is_active = 1) AS active, SUM(is_active = 1 AND gender = 'boys') AS boys_groups, SUM(is_active = 1 AND gender = 'girls') AS girls_groups,
-                               SUM(is_active = 1 AND (capacity IS NULL OR capacity > (SELECT COUNT(*) FROM lifegroup_memberships m JOIN people p ON p.id = m.person_id WHERE m.lifegroup_id = lifegroups.id AND m.left_at IS NULL AND p.archived_at IS NULL))) AS with_slots
+                               SUM(is_active = 1) AS with_slots
                           FROM lifegroups`).get();
   const leaders = db.prepare(`SELECT COUNT(DISTINCT leader_person_id) AS n FROM lifegroups WHERE is_active = 1 AND leader_person_id IS NOT NULL`).get().n
     + db.prepare(`SELECT COUNT(DISTINCT leader_name) AS n FROM lifegroups WHERE is_active = 1 AND leader_person_id IS NULL AND leader_name IS NOT NULL`).get().n;
@@ -317,7 +317,16 @@ router.get('/:id', requirePermission('lifegroups:view'), wrap((req, res) => {
     SELECT p.id, p.person_code, p.first_name, p.last_name, m.joined_at, m.left_at
       FROM lifegroup_memberships m JOIN people p ON p.id = m.person_id
      WHERE m.lifegroup_id = ? AND m.left_at IS NOT NULL ORDER BY m.left_at DESC LIMIT 50`).all(g.id);
-  res.json({ ...g, members, former });
+  let led_groups = [];
+  if (g.leads_network && members.length) {
+    const ids = members.map((m) => m.id);
+    led_groups = db.prepare(`SELECT x.id, x.name, x.leader_person_id,
+          (SELECT COUNT(*) FROM lifegroup_memberships m JOIN people p ON p.id = m.person_id WHERE m.lifegroup_id = x.id AND m.left_at IS NULL AND p.archived_at IS NULL) AS member_count,
+          (SELECT COUNT(*) FROM lifegroup_memberships m JOIN people p ON p.id = m.person_id WHERE m.lifegroup_id = x.id AND m.left_at IS NULL AND p.archived_at IS NULL AND m.tier = 'solid') AS solid_count,
+          (SELECT MAX(mt.meeting_date) FROM lifegroup_meetings mt WHERE mt.lifegroup_id = x.id AND mt.held = 1) AS last_held
+        FROM lifegroups x WHERE x.is_active = 1 AND x.leader_person_id IN (${ids.map(() => '?').join(',')})`).all(...ids);
+  }
+  res.json({ ...g, members, former, led_groups, solid_target: prog.target(prog.settings(db)) });
 }));
 
 // POST /api/lifegroups

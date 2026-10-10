@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { renderProgressCard, renderNetworkCalendar, drawProgressTab, solidBadge, weekStrip, memberSections, memberDots, dotsKey, TIER_LABEL } from './progress.js';
+import { renderProgressCard, renderNetworkCalendar, drawProgressTab, solidBadge, weekStrip, memberSections, memberDots, dotsKey, TIER_LABEL, linkDialog, meetingForm } from './progress.js';
 import { can } from '../app.js';
 import {
   html, raw, icon, avatar, fullName, statusBadge, fmtDate, emptyState, debounce, toast, confirmDialog,
@@ -14,7 +14,8 @@ import {
  */
 
 const esc = (t) => String(t ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const slotsText = (g) => ((g.max_members ?? g.capacity) == null ? 'Open' : g.slots > 0 ? `${g.slots} slot${g.slots === 1 ? '' : 's'}` : 'Full');
+const slotsText = (g) => (g.max_members == null ? 'Open' : g.slots > 0 ? `${g.slots} slot${g.slots === 1 ? '' : 's'}` : 'Full');
+const closedCount = (g) => g.members.filter((m) => m.tier === 'solid').length;
 /** Boys / girls ratio bar — exported so Reports can reuse it. */
 export function ratioBar(boys, girls, total, { compact = false } = {}) {
   total = total ?? boys + girls;
@@ -90,7 +91,6 @@ async function groupForm(g, onSaved) {
       <div class="field"><label>Category <span class="opt">optional</span></label><input name="category" value="${v('category')}" list="dlCat" autocomplete="off" placeholder="e.g. Students, Young Pro, Mixed" />${dl('dlCat', opts.categories)}</div>
       <div class="field"><label>Day <span class="opt">optional</span></label><select name="schedule_day"><option value="">—</option>${Object.entries(DAY_LABELS).map(([k, l]) => `<option value="${k}" ${g?.schedule_day === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
       <div class="field"><label>Time <span class="opt">optional</span></label><input name="schedule_time" type="time" value="${v('schedule_time')}" /></div>
-      <div class="field"><label>Capacity <span class="opt">blank = no limit</span></label><input name="capacity" type="number" min="1" max="999" value="${v('capacity')}" /></div>
       <div class="field"><label>Venue <span class="opt">optional</span></label><input name="venue" value="${v('venue')}" autocomplete="off" /></div>
       <div class="field span-2"><label>Notes <span class="opt">optional</span></label><textarea name="notes">${v('notes')}</textarea></div>
       ${g ? `<div class="field span-2"><label class="toggle"><input type="checkbox" name="is_active" ${g.is_active ? 'checked' : ''}/> Group is active</label><span class="help">Inactive groups are hidden from recommendations and new assignments; history is kept.</span></div>` : ''}
@@ -342,8 +342,12 @@ export async function renderLifegroup({ main }, id) {
     </div>
 
     <div class="grid grid--stats mb-2" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr))">
-      <div class="card stat"><span class="stat__label">Members</span><span class="stat__value">${g.member_count}${g.max_members != null ? html`<small> / ${g.max_members}</small>` : ''}</span>${g.leads_network ? html`<span class="small muted">Network leader — max ${g.max_members} leaders</span>` : ''}</div>
-      <div class="card stat"><span class="stat__label">Slots</span><span class="stat__value" style="font-size:1.15rem">${slotsText(g)}</span></div>
+      ${g.leads_network ? html`
+      <div class="card stat"><span class="stat__label">Cell leaders</span><span class="stat__value">${g.member_count}<small> / ${g.max_members}</small></span><span class="small muted">Network leader — max ${g.max_members}</span></div>
+      <div class="card stat"><span class="stat__label">Their Lifegroups</span><span class="stat__value">${g.led_groups.length}</span><span class="small muted">${g.led_groups.filter((x) => x.solid_count >= g.solid_target).length} solid</span></div>` : html`
+      <div class="card stat"><span class="stat__label">Members</span><span class="stat__value">${g.member_count}</span></div>
+      <div class="card stat ${closedCount(g) >= g.solid_target ? 'stat--ok' : ''}"><span class="stat__label">Closed cell</span><span class="stat__value">${closedCount(g)}<small> / ${g.solid_target}</small></span><span class="small muted">${closedCount(g) >= g.solid_target ? 'Solid Lifegroup' : 'max ' + g.solid_target + ' · ' + g.solid_target + ' = solid'}</span></div>
+      <div class="card stat"><span class="stat__label">Open cell</span><span class="stat__value">${g.member_count - closedCount(g)}</span><span class="small muted">no limit</span></div>`}
       <div class="card stat"><span class="stat__label">Schedule</span><span class="stat__value" style="font-size:1.15rem">${fmtSchedule(g) || '—'}</span></div>
     </div>
 
@@ -361,14 +365,31 @@ export async function renderLifegroup({ main }, id) {
           ${g.notes ? html`<div style="grid-column:1/-1"><dt>Notes</dt><dd>${g.notes}</dd></div>` : ''}
         </dl></div>
       </div>
-      <div class="card">
-        <div class="card__header"><h2>Members</h2><span class="hint">${g.members.filter((m) => m.tier !== 'solid').length} open cell · ${g.members.filter((m) => m.tier === 'solid').length} closed cell</span></div>
+      ${g.leads_network ? html`<div class="card">
+        <div class="card__header"><h2>Cell leaders</h2><span class="hint">${g.member_count} / ${g.max_members} · each leads their own Lifegroup</span></div>
+        <div class="card__body card__body--flush" id="membersCard">
+          ${g.members.length ? html`<div class="table-wrap"><table class="table table--stack">
+            <thead><tr><th>Cell leader</th><th>Present (last 4 wks)</th><th>Their Lifegroup</th><th class="num">Members</th><th class="num">Closed cell</th><th class="num">Open cell</th><th>Last held</th>${manage ? raw('<th></th>') : ''}</tr></thead>
+            <tbody>${g.members.map((m) => { const lg = g.led_groups.find((x) => x.leader_person_id === m.id); return html`<tr data-pid="${m.id}" class="cl-row" data-lg="${lg ? lg.id : ''}" title="${lg ? 'Show their Open / Closed cell' : ''}">
+              <td data-label="" class="nowrap"><span class="cl-caret" aria-hidden="true"></span><a href="#/people/${m.id}"><b>${fullName(m)}</b></a><div class="code">${m.person_code}</div>${lg ? raw('<div class="small cl-tap">Tap to see their Open / Closed cell</div>') : ''}</td>
+              <td data-label="Present" class="nowrap"><span class="l4slot muted small">…</span></td>
+              <td data-label="Their Lifegroup" class="nowrap">${lg ? html`<a href="#/lifegroups/${lg.id}">${lg.name}</a>` : raw('<span class="muted">No Lifegroup yet</span>')}</td>
+              <td data-label="Members" class="num">${lg ? lg.member_count : '—'}</td>
+              <td data-label="Closed cell" class="num nowrap">${lg ? (lg.solid_count >= g.solid_target ? raw(`<span class="badge badge--present badge--nodot" title="Solid Lifegroup">${lg.solid_count}</span>`) : html`<span class="nowrap">${lg.solid_count}<span class="muted small">/${g.solid_target}</span></span>`) : '—'}</td>
+              <td data-label="Open cell" class="num">${lg ? lg.member_count - lg.solid_count : '—'}</td>
+              <td data-label="Last held" class="small nowrap">${lg && lg.last_held ? fmtDate(lg.last_held, { short: true }) : raw('<span class="muted">—</span>')}</td>
+              ${manage ? html`<td data-label="" class="actions nowrap"><button class="btn btn--ghost btn--sm" data-leave="${m.id}" data-name="${fullName(m)}">Remove</button></td>` : ''}
+            </tr>`; })}</tbody></table></div>
+            <div class="card__footer small muted">${dotsKey()} · Present = attendance in this network leader's Lifegroup. Click a cell leader to see (and move) the members of their Open / Closed cell.</div>` : html`<div class="empty" style="padding:28px"><p>No cell leaders yet.${manage ? raw(' Use <b>Add member</b> to add up to 6 cell leaders.') : ''}</p></div>`}
+        </div>
+      </div>` : html`<div class="card">
+        <div class="card__header"><h2>Members</h2><span class="hint">${g.members.filter((m) => m.tier !== 'solid').length} open cell · ${closedCount(g)} / ${g.solid_target} closed cell</span></div>
         <div class="card__body card__body--flush" id="membersCard">
           ${g.members.length ? html`${memberSections(g.members.map((m) => ({ ...m, name: fullName(m), sub: html`${raw(statusBadge(m.status))} <span class="muted">since ${fmtDate(m.joined_at, { short: true })}</span>` })), { manage,
               actions: (m) => html`<button class="btn btn--ghost btn--sm" data-leave="${m.id}" data-name="${fullName(m)}" title="Remove from this Lifegroup">Remove</button> ` })}
-            <div class="card__footer small muted">${dotsKey()} · The leader moves members between open and closed cell on their QR page; staff can do it here.</div>` : html`<div class="empty" style="padding:28px"><p>No members yet.${manage ? raw(' Use <b>Add member</b> or assign from a person’s profile.') : ''}</p></div>`}
+            <div class="card__footer small muted">${dotsKey()} · Closed cell holds at most ${g.solid_target}; the open cell has no limit. The leader moves members on their QR page; staff can do it here.</div>` : html`<div class="empty" style="padding:28px"><p>No members yet.${manage ? raw(' Use <b>Add member</b> or assign from a person’s profile.') : ''}</p></div>`}
         </div>
-      </div>
+      </div>`}
     </div>
     <div class="card mt-2" id="progressCard"></div>
     ${g.former.length ? html`<div class="card mt-2"><div class="card__header"><h2>Former members</h2><span class="hint">History is kept</span></div>
@@ -378,6 +399,7 @@ export async function renderLifegroup({ main }, id) {
   renderProgressCard(main.querySelector('#progressCard'), g.id, { onChange: () => {}, onLoaded: (p) => {
     // fill in the last-4-weeks cells now that progress data is here
     const by = new Map(p.members.map((m) => [m.id, m.last4]));
+    main.querySelectorAll('#membersCard tr[data-pid] .l4slot').forEach((el) => { const l4 = by.get(Number(el.closest('tr').dataset.pid)); if (l4) el.outerHTML = memberDots(l4).value + (l4.consistency_pct != null ? ` <span class="small muted">${l4.consistency_pct}%</span>` : ''); else el.textContent = '—'; });
     main.querySelectorAll('#membersCard [data-tier]').forEach((b) => {
       const row = b.closest('tr'); const cell = row && row.querySelector('[data-label="Last 4 weeks"]'); const l4 = by.get(Number(b.dataset.tier));
       if (cell && l4) cell.innerHTML = memberDots(l4).value + (l4.consistency_pct != null ? ` <span class="small muted">${l4.consistency_pct}%</span>` : '');
@@ -388,6 +410,39 @@ export async function renderLifegroup({ main }, id) {
       try { await api.setTier(g.id, Number(b.dataset.tier), b.dataset.to); toast(b.dataset.to === 'solid' ? 'Moved to the closed cell.' : 'Moved to the open cell.'); renderLifegroup({ main }, id); }
       catch (e) { toast(e.message, 'error'); }
     });
+  });
+  // Network leader view: click a cell leader row to expand their own Lifegroup's Open / Closed cell
+  main.querySelectorAll('#membersCard tr.cl-row').forEach((row) => {
+    row.onclick = (ev) => {
+      if (ev.target.closest('a, button')) return;
+      const lgId = Number(row.dataset.lg);
+      if (!lgId) { toast('This cell leader has no Lifegroup yet.', 'info'); return; }
+      const next = row.nextElementSibling;
+      if (next && next.classList.contains('cl-detail')) { next.remove(); row.classList.remove('is-open'); return; }
+      const tr = document.createElement('tr'); tr.className = 'cl-detail';
+      const td = document.createElement('td'); td.colSpan = row.children.length; td.dataset.label = '';
+      td.innerHTML = '<div class="loading small" style="padding:12px 16px">Loading…</div>';
+      tr.appendChild(td); row.after(tr); row.classList.add('is-open');
+      const draw = async () => {
+        let p;
+        try { p = await api.lifegroupProgress(lgId, 4); } catch (e) { td.innerHTML = html`<div class="alert alert--error" style="margin:10px 16px">${e.message}</div>`; return; }
+        const solid = p.members.filter((m) => m.tier === 'solid').length;
+        td.innerHTML = html`<div class="cl-detail__head small"><a href="#/lifegroups/${lgId}"><b>${p.group.name}</b></a><span class="muted"> · ${p.members.length} members · Closed cell ${solid} / ${p.target}${solid >= p.target ? ' · Solid Lifegroup' : ''} · Open cell ${p.members.length - solid}</span></div>
+          ${p.members.length ? memberSections(p.members.map((m) => ({ ...m, name: `${m.first_name} ${m.last_name}` })), { manage }) : raw('<div class="small muted" style="padding:10px 16px">No members yet.</div>')}`;
+        // keep the summary row in sync after a move
+        const cellOf = (label) => row.querySelector(`td[data-label="${label}"]`);
+        if (cellOf('Members')) cellOf('Members').textContent = p.members.length;
+        if (cellOf('Open cell')) cellOf('Open cell').textContent = p.members.length - solid;
+        if (cellOf('Closed cell')) cellOf('Closed cell').innerHTML = solid >= p.target ? `<span class="badge badge--present badge--nodot" title="Solid Lifegroup">${solid}</span>` : `<span class="nowrap">${solid}<span class="muted small">/${p.target}</span></span>`;
+        td.querySelectorAll('[data-tier]').forEach((b) => {
+          b.onclick = () => withLoading(b, async () => {
+            try { await api.setTier(lgId, Number(b.dataset.tier), b.dataset.to); toast(b.dataset.to === 'solid' ? 'Moved to the closed cell.' : 'Moved to the open cell.'); await draw(); }
+            catch (e) { toast(e.message, 'error'); }
+          });
+        });
+      };
+      draw();
+    };
   });
   main.querySelector('#editGroup')?.addEventListener('click', () => groupForm(g, () => renderLifegroup({ main }, id)));
   main.querySelector('#delGroup')?.addEventListener('click', async () => {
@@ -561,6 +616,7 @@ export async function renderNetwork({ main }, id) {
   const boys = n.groups.reduce((t, g) => t + g.boys, 0), girls = n.groups.reduce((t, g) => t + g.girls, 0);
   const leaders = new Set(n.groups.filter((g) => g.is_active && (g.leader_person_id || g.leader_name)).map((g) => g.leader_person_id ? 'p' + g.leader_person_id : 'n' + g.leader_name)).size;
   const personLink = (p) => html`<a href="#/people/${p.id}">${fullName(p)}</a>`;
+  const leaderGroup = cal && cal.groups ? cal.groups.find((g) => g.is_leader_group) || null : null;
 
   main.innerHTML = html`
     <div class="page-header">
@@ -569,8 +625,17 @@ export async function renderNetwork({ main }, id) {
         <h1 class="mt-1">${n.name}</h1>
         <div class="row mt-1">${genderBadge(n.gender, { long: true, noun: 'network' })}<span class="small muted">${n.parent_network_id ? html`Network under <a href="#/networks/${n.parent_network_id}">${n.parent_name}</a>` : 'Top-level Network'}${n.is_auto ? ' · formed automatically' : ''}</span>${n.is_active ? '' : raw('<span class="badge badge--nodot">Inactive</span>')}${n.is_demo ? raw('<span class="badge badge--demo badge--nodot">Demo data</span>') : ''}</div>
       </div>
-      ${manage ? html`<div class="page-actions"><button class="btn btn--primary" id="editNet">${icon('edit')} Edit</button></div>` : ''}
+      ${manage ? html`<div class="page-actions">${leaderGroup ? html`<button class="btn btn--primary" id="netReport">${icon('plus')} Report a meeting</button><button class="btn" id="netQr">${icon('link')} Network QR</button>` : ''}<button class="btn" id="editNet">${icon('edit')} Edit</button></div>` : ''}
     </div>
+    ${manage ? html`<div class="card mb-2 netqr" id="netQrCard">
+      <div class="netqr__img" id="netQrImg">${leaderGroup ? raw('<div class="loading small">…</div>') : ''}</div>
+      <div class="netqr__text">
+        <b>Network QR · ${n.name}</b>
+        ${leaderGroup ? html`<div class="small muted">For this Network only. ${n.leader_name || 'The network leader'} scans it — no login — to see their cell leaders (held Lifegroup? who was present? Open / Closed cell) and to send the weekly report of <a href="#/lifegroups/${leaderGroup.id}">${leaderGroup.name}</a>. Press <b>New QR</b> if somebody else gets the link.</div>
+          <div class="row mt-1" style="gap:8px;flex-wrap:wrap"><button class="btn btn--sm" id="netQrOpen">${icon('link', 14)} Link, print &amp; New QR</button><button class="btn btn--sm" id="netQrCopy">${icon('copy', 14)} Copy link</button></div>`
+        : html`<div class="small muted">${n.leader_person_id ? `${n.leader_name} does not lead a Lifegroup yet. Create their Lifegroup (leader = ${n.leader_name}) and the Network QR appears here automatically.` : 'Set the network leader first (Edit) — the QR is created automatically once they lead a Lifegroup.'}</div>`}
+      </div>
+    </div>` : ''}
 
     ${!n.gender ? html`<div class="alert alert--warn mb-2">${icon('warn', 16)} This Network is not yet marked as boys or girls. ${manage ? 'Press Edit and choose one — networks are never combined.' : 'Ask an Admin to set it.'}${boys && girls ? html` It currently holds ${boys} boys and ${girls} girls; move one side to another Network first.` : ''}</div>` : ''}
     <div class="grid grid--stats mb-2" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr))">
@@ -624,6 +689,18 @@ export async function renderNetwork({ main }, id) {
     <div class="card mb-2" id="netCalendar"></div>
     ${can('people:delete') && !n.groups.length && !n.children.length ? html`<div class="row mt-3" style="padding:0 4px"><button class="btn btn--ghost small" id="delNet" style="color:var(--muted)">Delete this empty network</button></div>` : ''}`;
   renderNetworkCalendar(main.querySelector('#netCalendar'), n.id, cal);
+  if (manage && leaderGroup) {
+    let prog = null;
+    const load = async () => { prog = await api.lifegroupProgress(leaderGroup.id, 4); return prog; };
+    load().then((p) => { const img = main.querySelector('#netQrImg'); if (img) img.innerHTML = p.report_qr || ''; }).catch((e) => { const img = main.querySelector('#netQrImg'); if (img) img.innerHTML = html`<span class="small muted">${e.message}</span>`; });
+    const openLink = async () => { try { const p = prog || await load(); linkDialog(leaderGroup.id, p, (link, qr) => { p.report_link = link; p.report_qr = qr; const img = main.querySelector('#netQrImg'); if (img) img.innerHTML = qr || ''; }, { network: n.name }); } catch (e) { toast(e.message, 'error'); } };
+    main.querySelector('#netQr').onclick = openLink;
+    main.querySelector('#netQrOpen').onclick = openLink;
+    main.querySelector('#netQrCopy').onclick = async () => {
+      try { const p = prog || await load(); await navigator.clipboard.writeText(p.report_link); toast('Network link copied.'); } catch (e) { toast(e.message || 'Could not copy — open the QR dialog and copy from there.', 'error'); }
+    };
+    main.querySelector('#netReport').onclick = async () => { try { const p = prog || await load(); meetingForm(leaderGroup.id, p, null, () => renderNetwork({ main }, id)); } catch (e) { toast(e.message, 'error'); } };
+  }
   main.querySelector('#editNet')?.addEventListener('click', () => networkForm(n, () => renderNetwork({ main }, id)));
   main.querySelector('#delNet')?.addEventListener('click', async () => {
     const ok = await confirmDialog({ title: `Delete ${n.name}?`, message: 'This Network has no Lifegroups or sub-networks, so it can be removed.', confirmText: 'Delete', danger: true });

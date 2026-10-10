@@ -1006,3 +1006,30 @@ details[open] > summary .t-open { display: none; } details:not([open]) > summary
 .cl .cells .cell { background: #fff; }
 .cl__held { flex: none; font-size: .68rem; }
 .cl__recent { margin: 4px 0 8px; padding-left: 18px; font-size: .82rem; line-height: 1.55; color: var(--ink-700, #374151); }
+.stat--ok { background: var(--green-100); border-color: #bbf7d0; } .stat--ok .stat__value { color: #15803d; }
+
+/* Network leader detail: expandable cell-leader rows */
+.cl-row { cursor: pointer; }
+.cl-row:hover td { background: var(--ink-50, #f8fafc); }
+.cl-caret { display: inline-block; width: 7px; height: 7px; border-right: 1.5px solid var(--muted); border-bottom: 1.5px solid var(--muted); transform: rotate(-45deg); margin: 0 10px 2px 2px; transition: transform .15s; }
+.cl-row.is-open .cl-caret { transform: rotate(45deg); }
+.cl-row.is-open td { background: var(--ink-50, #f8fafc); }
+.cl-tap { color: var(--muted); margin-top: 2px; }
+.cl-detail > td { padding: 0 !important; background: #fff; border-top: 0; }
+.cl-detail__head { padding: 10px 16px; border-bottom: 1px solid var(--border); background: var(--ink-50, #f8fafc); }
+.cl-detail .cells { border-bottom: 1px solid var(--border); }
+.cl-detail .cells .cell { background: #fff; }
+@media (max-width: 720px) { .table--stack tr.cl-detail { padding: 0; } .table--stack tr.cl-detail td { display: block; text-align: left; } .cl-tap { display: none; } .cl-row::after { content: 'Tap to see their Open / Closed cell'; display: block; font-size: .75rem; color: var(--muted); padding-top: 4px; } .cl-row.is-open::after { content: 'Tap to hide'; } }
+@media (max-width: 720px) { .cells .table--stack td.actions { width: auto; justify-content: flex-end; } .cells .table--stack td.actions .btn { display: inline-block; width: auto; margin: 0 0 0 6px; } }
+
+/* Network page: Network QR card */
+.netqr { display: flex; gap: 16px; align-items: center; padding: 14px 16px; }
+.netqr__img { flex: none; width: 96px; height: 96px; display: flex; align-items: center; justify-content: center; border: 1px solid var(--border); border-radius: var(--radius-sm); background: #fff; overflow: hidden; }
+.netqr__img svg { width: 88px; height: 88px; display: block; }
+.netqr__text { min-width: 0; flex: 1; }
+@media (max-width: 560px) { .netqr { align-items: flex-start; } }
+/* Reports: boys / girls structure tiles */
+.sexsplit { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 16px; }
+.kpi-row--4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+@media (max-width: 480px) { .kpi-row--4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media print { .sexsplit { grid-template-columns: 1fr 1fr; } }

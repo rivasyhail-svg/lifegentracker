@@ -117,22 +117,25 @@ export async function renderProgressCard(card, groupId, { onChange, onLoaded } =
   draw();
 }
 
-function linkDialog(groupId, p, onReset) {
+export function linkDialog(groupId, p, onReset, { network = null } = {}) {
   const modal = openModal({
-    title: 'Leader report link',
-    subtitle: `${p.group.name} · give this only to ${p.group.leader_name || 'the leader'}`,
+    title: network ? 'Network QR · network leader link' : 'Leader report link',
+    subtitle: network ? `${network} · give this only to ${p.group.leader_name || 'the network leader'}` : `${p.group.name} · give this only to ${p.group.leader_name || 'the leader'}`,
     body: `<div class="stack">
-      <p class="small">The leader opens this link (or scans the QR) on their phone — no login — and reports each week with a few taps: date, who was there, who had devotion, newcomers. A network leader also sees every Lifegroup in their network there. Anyone with the link can report for this group, so keep it private.</p>
-      <p class="small"><b>Permanent and unique to this Lifegroup.</b> Print it once — it keeps working every week and never changes unless you press <i>New link</i>.</p>
+      ${network
+        ? `<p class="small">This QR belongs to <b>${esc(network)}</b> only. The network leader scans it on their phone — no login — and sees <b>My cell leaders</b> (who held Lifegroup, who was present, each one's Open / Closed cell) plus the <b>Weekly report</b> for their own Lifegroup. Anyone with the link can report for this network, so keep it private.</p>
+           <p class="small"><b>Permanent and unique to this Network.</b> Every Network gets its own QR automatically. If someone else gets hold of it, press <i>New QR</i> — the old one stops working at once.</p>`
+        : `<p class="small">The leader opens this link (or scans the QR) on their phone — no login — and reports each week with a few taps: date, who was there, who had devotion, newcomers. A network leader also sees every Lifegroup in their network there. Anyone with the link can report for this group, so keep it private.</p>
+           <p class="small"><b>Permanent and unique to this Lifegroup.</b> Print it once — it keeps working every week and never changes unless you press <i>New link</i>.</p>`}
       <div class="qr-preview" id="lgQr" style="max-width:220px;margin:0 auto">${p.report_qr || ''}</div>
       <div class="field"><label>Link</label><input id="lgLinkUrl" readonly value="${esc(p.report_link || '')}" /></div>
       <div class="row" style="gap:8px;flex-wrap:wrap">
         <button class="btn btn--sm" id="lgCopy">${icon('copy', 14).value} Copy link</button>
         <a class="btn btn--sm" id="lgOpen" href="${esc(p.report_link || '#')}" target="_blank" rel="noopener">${icon('link', 14).value} Open</a>
         <button class="btn btn--sm" id="lgPrint">${icon('print', 14).value} Print QR</button>
-        <button class="btn btn--sm btn--ghost" id="lgReset" style="margin-left:auto;color:var(--red-600)">${icon('undo', 14).value} New link</button>
+        <button class="btn btn--sm btn--ghost" id="lgReset" style="margin-left:auto;color:var(--red-600)">${icon('undo', 14).value} ${network ? 'New QR' : 'New link'}</button>
       </div>
-      <p class="small muted">“New link” stops the old link from working — use it if the link was shared with the wrong person or the leader changed.</p>
+      <p class="small muted">“${network ? 'New QR' : 'New link'}” stops the old link from working — use it if the link was shared with the wrong person or the leader changed.</p>
     </div>`,
     footer: `<button class="btn" data-close>Close</button>`,
   });
@@ -144,11 +147,11 @@ function linkDialog(groupId, p, onReset) {
   modal.querySelector('#lgPrint').onclick = () => {
     const w = window.open('', '_blank');
     if (!w) return toast('Allow pop-ups to print.', 'error');
-    w.document.write(`<!doctype html><title>${esc(p.group.name)} — leader link</title><body style="font-family:system-ui;text-align:center;padding:40px"><h2 style="margin:0 0 4px">${esc(p.group.name)}</h2><p style="margin:0 0 20px;color:#555">Lifegroup weekly report · ${esc(p.group.leader_name || '')}</p><div style="max-width:320px;margin:0 auto">${p.report_qr || ''}</div><p style="font-size:12px;word-break:break-all;color:#555">${esc(p.report_link || '')}</p><p style="font-size:12px;color:#999">Private — for the Lifegroup leader only.</p></body>`);
+    w.document.write(`<!doctype html><title>${esc(p.group.name)} — leader link</title><body style="font-family:system-ui;text-align:center;padding:40px"><h2 style="margin:0 0 4px">${esc(network || p.group.name)}</h2><p style="margin:0 0 20px;color:#555">${network ? 'Network leader QR' : 'Lifegroup weekly report'} · ${esc(p.group.leader_name || '')}</p><div style="max-width:320px;margin:0 auto">${p.report_qr || ''}</div><p style="font-size:12px;word-break:break-all;color:#555">${esc(p.report_link || '')}</p><p style="font-size:12px;color:#999">Private — for the ${network ? 'network' : 'Lifegroup'} leader only.</p></body>`);
     w.document.close(); w.focus(); setTimeout(() => w.print(), 300);
   };
   modal.querySelector('#lgReset').onclick = async (e) => {
-    const ok = await confirmDialog({ title: 'Create a new leader link?', message: 'The current link and QR will stop working immediately. You will need to send the new one to the leader.', confirmText: 'New link', danger: true });
+    const ok = await confirmDialog({ title: network ? 'Create a new Network QR?' : 'Create a new leader link?', message: 'The current link and QR will stop working immediately. You will need to send the new one to the leader.', confirmText: 'New link', danger: true });
     if (!ok) return;
     await withLoading(e.currentTarget, async () => {
       try {

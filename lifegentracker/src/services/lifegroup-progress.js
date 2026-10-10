@@ -26,11 +26,11 @@ const target = (s) => Math.max(1, Number(s.lifegroup_solid_target) || 6);
  */
 const NETWORK_LEADER_MAX = 6;
 function maxMembers(db, groupId) {
-  const g = db.prepare('SELECT capacity, leader_person_id FROM lifegroups WHERE id = ?').get(groupId);
+  // Structure: network leader → max 6 cell leaders; a cell leader's open cell has no limit (closed cell is capped by the target).
+  const g = db.prepare('SELECT leader_person_id FROM lifegroups WHERE id = ?').get(groupId);
   if (!g) return null;
   const isNetLeader = g.leader_person_id && db.prepare('SELECT 1 FROM networks WHERE leader_person_id = ? AND is_active = 1 LIMIT 1').get(g.leader_person_id);
-  if (isNetLeader) return g.capacity != null ? Math.min(g.capacity, NETWORK_LEADER_MAX) : NETWORK_LEADER_MAX;
-  return g.capacity != null ? g.capacity : null;
+  return isNetLeader ? NETWORK_LEADER_MAX : null;
 }
 function currentCount(db, groupId) {
   return db.prepare('SELECT COUNT(*) n FROM lifegroup_memberships m JOIN people x ON x.id = m.person_id WHERE m.lifegroup_id = ? AND m.left_at IS NULL AND x.archived_at IS NULL').get(groupId).n;
@@ -40,11 +40,7 @@ function assertRoom(db, groupId, groupName) {
   const cap = maxMembers(db, groupId);
   if (cap == null) return;
   const n = currentCount(db, groupId);
-  if (n >= cap) {
-    const g = db.prepare('SELECT leader_person_id, capacity FROM lifegroups WHERE id = ?').get(groupId);
-    const net = g.leader_person_id && db.prepare('SELECT 1 FROM networks WHERE leader_person_id = ? AND is_active = 1 LIMIT 1').get(g.leader_person_id);
-    throw new HttpError(409, net && (g.capacity == null || g.capacity > NETWORK_LEADER_MAX) ? `${groupName || 'This Lifegroup'} already has ${n} members — a network leader handles at most ${NETWORK_LEADER_MAX}.` : `${groupName || 'This Lifegroup'} is full (${cap}). Choose another group or raise its capacity.`);
-  }
+  if (n >= cap) throw new HttpError(409, `${groupName || 'This Lifegroup'} already has ${n} cell leaders — a network leader handles at most ${NETWORK_LEADER_MAX}.`);
 }
 const tz = (s) => s.qr_timezone || 'Asia/Manila';
 
@@ -468,7 +464,28 @@ function networkStatus(db) {
       solid_groups: solidGroups, solid_groups_pct: groups ? Math.round((solidGroups / groups) * 100) : null, met_this_week: all.met_this_week, consistency_pct: all.consistency_pct,
       devotion_members: total('devotion_members'), devotion_pct: members ? Math.round((total('devotion_members') / members) * 100) : null,
       sunday_pct: sunMembers ? Math.round((sunPresent / sunMembers) * 100) : null },
-    by_gender: { boys: summarize(rows.filter((g) => g.gender === 'boys')), girls: summarize(rows.filter((g) => g.gender === 'girls')) } };
+    by_gender: { boys: summarize(rows.filter((g) => g.gender === 'boys')), girls: summarize(rows.filter((g) => g.gender === 'girls')) },
+    structure: structureTiles(db) };
+}
+
+/**
+ * Church-structure headline numbers per sex: networks, cell leaders (members of a network leader's Lifegroup),
+ * and the open / closed cell members of the ordinary Lifegroups (network leaders' own groups excluded — those hold cell leaders).
+ */
+function structureTiles(db) {
+  const LEADS_NET = 'EXISTS (SELECT 1 FROM networks xn WHERE xn.leader_person_id = g.leader_person_id AND xn.is_active = 1)';
+  const out = {};
+  for (const [key, sex] of [['boys', 'male'], ['girls', 'female']]) {
+    const networks = Number(db.prepare('SELECT COUNT(*) AS n FROM networks WHERE is_active = 1 AND gender = ?').get(key).n);
+    const cellLeaders = Number(db.prepare(`SELECT COUNT(DISTINCT m.person_id) AS n FROM lifegroup_memberships m JOIN people p ON p.id = m.person_id JOIN lifegroups g ON g.id = m.lifegroup_id
+       WHERE m.left_at IS NULL AND p.archived_at IS NULL AND g.is_active = 1 AND p.sex = ? AND ${LEADS_NET}`).get(sex).n);
+    const cells = db.prepare(`SELECT COUNT(CASE WHEN m.tier = 'solid' THEN 1 END) AS closed, COUNT(CASE WHEN COALESCE(m.tier, 'new') <> 'solid' THEN 1 END) AS open
+       FROM lifegroup_memberships m JOIN people p ON p.id = m.person_id JOIN lifegroups g ON g.id = m.lifegroup_id
+       WHERE m.left_at IS NULL AND p.archived_at IS NULL AND g.is_active = 1 AND p.sex = ? AND NOT ${LEADS_NET}`).get(sex);
+    const lifegroups = Number(db.prepare(`SELECT COUNT(*) AS n FROM lifegroups g WHERE g.is_active = 1 AND g.gender = ? AND NOT ${LEADS_NET}`).get(key).n);
+    out[key] = { networks, cell_leaders: cellLeaders, lifegroups, open_cell: Number(cells.open), closed_cell: Number(cells.closed), members: Number(cells.open) + Number(cells.closed) };
+  }
+  return out;
 }
 
 /** Everything the Progress tab needs: overall numbers, per-network and per-group tables. */

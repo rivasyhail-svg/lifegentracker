@@ -216,16 +216,15 @@ async function renderLifegroupReport({ main }) {
   const solidById = new Map(ns.networks.map((n) => [n.id || 0, n]));
   report.innerHTML = html`
     <div class="print-header"><h1>${state.settings.church_name} — Lifegroup Report</h1><p>Network status and Lifegroup statistics · generated ${fmtDate(toISODate(new Date()))}</p></div>
-    <div class="kpi-row mb-2" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr))">
-      <div class="kpi"><b>${fmtNum(nt.networks)}</b><span>Networks</span></div>
-      <div class="kpi"><b>${fmtNum(nt.groups)}</b><span>Lifegroups</span><small class="muted">${t.boys_groups} boys · ${t.girls_groups} girls</small></div>
-      <div class="kpi"><b>${fmtNum(nt.members)}</b><span>Connected</span><small class="muted">${t.boys} boys · ${t.girls} girls</small></div>
-      <div class="kpi kpi--teal"><b>${pctTxt(nt.solid_pct)}</b><span>Closed cell</span><small class="muted">${nt.solid_members} of ${nt.members} members</small></div>
-      <div class="kpi"><b>${nt.solid_groups}<small>/${nt.groups}</small></b><span>Solid Lifegroups</span><small class="muted">${ns.target} in the closed cell each</small></div>
-      <div class="kpi"><b>${pctTxt(nt.consistency_pct)}</b><span>Held, last 4 weeks</span></div>
-      <div class="kpi"><b>${pctTxt(nt.sunday_pct)}</b><span>Members at Lifegen</span><small class="muted">${ns.last_sunday ? fmtDate(ns.last_sunday, { short: true }) : '—'}</small></div>
-      <div class="kpi ${r.not_connected.total ? 'kpi--amber' : ''}"><b>${fmtNum(r.not_connected.total)}</b><span>Not connected</span><small class="muted">${r.not_connected.boys} boys · ${r.not_connected.girls} girls</small></div>
-    </div>
+    ${(() => { const st = ns.structure || {}; const sec = (label, x) => html`<div class="card sexsplit__card">
+        <div class="card__header"><h2>${label}</h2><span class="hint">${x.lifegroups} Lifegroup${x.lifegroups === 1 ? '' : 's'} · ${x.members} members</span></div>
+        <div class="card__body"><div class="kpi-row kpi-row--4">
+          <div class="kpi"><b>${fmtNum(x.networks)}</b><span>Networks</span></div>
+          <div class="kpi"><b>${fmtNum(x.cell_leaders)}</b><span>Cell leaders</span></div>
+          <div class="kpi"><b>${fmtNum(x.open_cell)}</b><span>Open cell</span></div>
+          <div class="kpi kpi--teal"><b>${fmtNum(x.closed_cell)}</b><span>Closed cell</span></div>
+        </div></div>
+      </div>`; return html`<div class="sexsplit mb-2">${sec('Boys', st.boys || { networks: 0, cell_leaders: 0, lifegroups: 0, members: 0, open_cell: 0, closed_cell: 0 })}${sec('Girls', st.girls || { networks: 0, cell_leaders: 0, lifegroups: 0, members: 0, open_cell: 0, closed_cell: 0 })}</div>`; })()}
 
     <div class="card mb-2">
       <div class="card__header"><h2>Network status</h2><span class="hint">ratios per Network · last 4 weeks</span></div>
