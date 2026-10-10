@@ -261,9 +261,9 @@ export async function drawProgressTab(body) {
     all.innerHTML = rows.length ? html`<div class="table-wrap"><table class="table table--grid">
       <thead><tr><th>Lifegroup</th><th>Network</th><th>Closed cell</th><th class="num">Members</th>${d.weeks.map((w) => html`<th class="num small">${weekLabel(w)}</th>`)}</tr></thead>
       <tbody>${rows.map((g) => html`<tr>
-        <td><a href="#/lifegroups/${g.id}"><b>${g.name}</b></a><div class="small muted">${g.leader_name || '—'}</div></td>
+        <td><a href="#/lifegroups/${g.id}"><b>${g.name}</b></a>${g.is_leader_group ? raw(' <span class="badge badge--leader">Network leader’s Lifegroup</span>') : ''}<div class="small muted">${g.leader_name || '—'}</div></td>
         <td class="small">${g.network_name || raw('<span class="muted">—</span>')}</td>
-        <td class="nowrap">${solidBadge(g.solid, g.target, g.is_solid)}</td>
+        <td class="nowrap">${g.is_leader_group ? html`<span class="small muted">${g.total} / 6 cell leaders</span>` : solidBadge(g.solid, g.target, g.is_solid)}</td>
         <td class="num">${g.total}</td>
         ${g.calendar.map((w) => { const m = w.meeting; return html`<td class="num"><span class="wk__c wk__c--md ${!m ? 'wk__c--none' : m.held ? 'wk__c--held' : 'wk__c--skip'}" title="${!m ? 'Not reported' : m.held ? `Held ${fmtDate(m.date, { short: true })} · ${m.present} present` : 'No Lifegroup'}">${m && m.held ? m.present : m ? '×' : ''}</span></td>`; })}
       </tr>`)}</tbody></table></div><div class="card__footer small muted">${rows.length} group${rows.length === 1 ? '' : 's'} · <span class="wk__c wk__c--held wk__c--key"></span> held <span class="wk__c wk__c--skip wk__c--key"></span> no Lifegroup <span class="wk__c wk__c--none wk__c--key"></span> not reported</div>` : emptyState({ icon: 'group', title: 'No group matches', text: '' });

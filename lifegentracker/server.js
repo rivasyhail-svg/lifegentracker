@@ -38,6 +38,9 @@ if (AUTH_DISABLED) {
 }
 // Automatic daily database snapshot (data/backups/, last 14 kept).
 if (!dbInitError) backup.scheduleAuto(getDb(), DB_FILE);
+// Networks are independent roots: re-derive Lifegroup → Network links once at start (a network leader's own
+// Lifegroup always sits in their own Network; nothing is ever nested). Best effort — the app runs even if it fails.
+if (!dbInitError) { try { require('./src/services/networks-auto').syncNetworks(getDb(), null); } catch (e) { console.warn('[networks] startup sync skipped:', e.message); } }
 
 /** Plain-language hint for the most common hosted-database mistakes. */
 function dbHint(err) {
@@ -92,9 +95,9 @@ api.use((req, res, next) => {
 });
 api.get('/health', (req, res) => {
   if (dbInitError && !tryInitDb()) {
-    return res.status(503).json({ ok: false, app: 'LifegenTracker', time: new Date().toISOString(), db: 'error', db_error: dbInitError.message, hint: dbHint(dbInitError) });
+    return res.status(503).json({ ok: false, app: 'LifegenTracker', version: '2026.10.10-3n', time: new Date().toISOString(), db: 'error', db_error: dbInitError.message, hint: dbHint(dbInitError) });
   }
-  res.json({ ok: true, app: 'LifegenTracker', time: new Date().toISOString(), db: 'ok' });
+  res.json({ ok: true, app: 'LifegenTracker', version: '2026.10.10-3n', time: new Date().toISOString(), db: 'ok' });
 });
 // Every other API call needs the database; answer clearly instead of crashing while it is unavailable.
 api.use((req, res, next) => {

@@ -35,8 +35,16 @@ function maxMembers(db, groupId) {
 function currentCount(db, groupId) {
   return db.prepare('SELECT COUNT(*) n FROM lifegroup_memberships m JOIN people x ON x.id = m.person_id WHERE m.lifegroup_id = ? AND m.left_at IS NULL AND x.archived_at IS NULL').get(groupId).n;
 }
-/** Throws 409 when one more member would exceed the cap. */
-function assertRoom(db, groupId, groupName) {
+/** A Network leader is the root of their own independent Network — they can never be a member of a Lifegroup. */
+function assertNotNetworkLeader(db, personId, groupName) {
+  if (!personId) return;
+  const n = db.prepare(`SELECT n.name, p.first_name, p.last_name FROM networks n JOIN people p ON p.id = n.leader_person_id
+      WHERE n.leader_person_id = ? AND n.is_active = 1 LIMIT 1`).get(personId);
+  if (n) throw new HttpError(409, `${n.first_name} ${n.last_name} leads ${n.name}. A Network leader is independent and cannot be placed under another leader${groupName ? ` (${groupName})` : ''}.`);
+}
+/** Throws 409 when one more member would exceed the cap (and, when personId is given, when that person is a Network leader). */
+function assertRoom(db, groupId, groupName, personId = null) {
+  assertNotNetworkLeader(db, personId, groupName);
   const cap = maxMembers(db, groupId);
   if (cap == null) return;
   const n = currentCount(db, groupId);
@@ -229,7 +237,7 @@ function restoreMember(db, groupId, personId, { user = null, via = 'admin', byNa
   if (!prev) throw new HttpError(404, 'No former membership found.');
   const cur = db.prepare('SELECT g.name FROM lifegroup_memberships m JOIN lifegroups g ON g.id = m.lifegroup_id WHERE m.person_id = ? AND m.left_at IS NULL').get(personId);
   if (cur) throw new HttpError(409, `${prev.first_name} ${prev.last_name} is now in ${cur.name} — ask the admin to move them.`);
-  assertRoom(db, groupId, prev.name);
+  assertRoom(db, groupId, prev.name, personId);
   const today = churchToday(db);
   db.prepare("INSERT INTO lifegroup_memberships (person_id, lifegroup_id, role, tier, joined_at, notes) VALUES (?, ?, 'member', ?, ?, ?)").run(personId, groupId, prev.tier || 'new', today, `Brought back${via === 'leader_link' ? ` by leader ${byName || ''} (report link)` : ''}`.trim());
   activity.log(db, user, 'lifegroup.assign', 'person', personId, `${prev.first_name} ${prev.last_name} brought back to ${prev.name}${via === 'leader_link' ? ` by leader ${byName || ''} (report link)` : ''}`.trim());
@@ -283,7 +291,7 @@ function recordMeeting(db, groupId, body, meta = {}) {
         pid = dup.id; // already in People: just place them in this group (one current membership per person)
         const cur = db.prepare('SELECT lifegroup_id FROM lifegroup_memberships WHERE person_id = ? AND left_at IS NULL').get(pid);
         if (cur && cur.lifegroup_id !== groupId) throw new HttpError(409, `${dup.first_name} ${dup.last_name} is already in another Lifegroup — ask the admin to move them.`, { new_members: 'already in another group' });
-        if (!cur) { assertRoom(db, groupId, g.name); db.prepare("INSERT INTO lifegroup_memberships (person_id, lifegroup_id, role, tier, joined_at, notes) VALUES (?, ?, 'member', 'new', ?, ?)").run(pid, groupId, date, `Added via Lifegroup report${meta.byName ? ' by ' + meta.byName : ''}`); }
+        if (!cur) { assertRoom(db, groupId, g.name, pid); db.prepare("INSERT INTO lifegroup_memberships (person_id, lifegroup_id, role, tier, joined_at, notes) VALUES (?, ?, 'member', 'new', ?, ?)").run(pid, groupId, date, `Added via Lifegroup report${meta.byName ? ' by ' + meta.byName : ''}`); }
       } else {
         assertRoom(db, groupId, g.name);
         const info = db.prepare(`INSERT INTO people (first_name, last_name, full_name_normalized, sex, status, date_registered, notes, registration_source, added_via, registered_at, created_by)
@@ -337,6 +345,7 @@ function groupRows(db, where = '', params = []) {
   return db.prepare(`
     SELECT g.id, g.name, g.gender, g.network_id, g.leader_person_id, g.schedule_day, g.schedule_time,
            COALESCE(lp.first_name || ' ' || lp.last_name, g.leader_name) AS leader_name, n.name AS network_name,
+           EXISTS (SELECT 1 FROM networks xn WHERE xn.leader_person_id = g.leader_person_id AND xn.is_active = 1) AS is_leader_group,
            (SELECT COUNT(*) FROM lifegroup_memberships m JOIN people p ON p.id = m.person_id WHERE m.lifegroup_id = g.id AND m.left_at IS NULL AND p.archived_at IS NULL) AS total,
            (SELECT COUNT(*) FROM lifegroup_memberships m JOIN people p ON p.id = m.person_id WHERE m.lifegroup_id = g.id AND m.left_at IS NULL AND p.archived_at IS NULL AND m.tier = 'solid') AS solid,
            (SELECT MAX(meeting_date) FROM lifegroup_meetings mt WHERE mt.lifegroup_id = g.id AND mt.held = 1) AS last_held
@@ -348,7 +357,7 @@ function attachCalendars(db, rows, weeks, s) {
   return rows.map((g) => {
     const cal = calendar(db, g.id, weeks, s);
     const held4 = cal.slice(-4).filter((w) => w.meeting && w.meeting.held).length;
-    return { ...g, target: t, is_solid: g.solid >= t, new_members: g.total - g.solid, held_last_4: held4, met_this_week: Boolean(cal[cal.length - 1].meeting && cal[cal.length - 1].meeting.held), calendar: cal };
+    return { ...g, is_leader_group: Boolean(Number(g.is_leader_group)), target: t, is_solid: g.solid >= t, new_members: g.total - g.solid, held_last_4: held4, met_this_week: Boolean(cal[cal.length - 1].meeting && cal[cal.length - 1].meeting.held), calendar: cal };
   });
 }
 
@@ -394,7 +403,9 @@ function leaderNetworkView(db, leaderPersonId, { weeks = 4 } = {}) {
   return { networks: nets, weeks: recentWeeks(db, weeks, s), groups, summary: summarize(rows) };
 }
 
-function summarize(rows) {
+function summarize(allRows) {
+  // A network leader's own Lifegroup holds the cell leaders — it is the root of the network, not a cell, so it is left out of cell numbers.
+  const rows = allRows.filter((g) => !g.is_leader_group);
   const out = { groups: rows.length, solid_groups: rows.filter((g) => g.is_solid).length, solid_members: 0, new_members: 0, total_members: 0, met_this_week: 0, reported_this_week: 0, held_last_4: 0, possible_last_4: rows.length * 4 };
   for (const g of rows) {
     out.solid_members += g.solid; out.new_members += g.new_members; out.total_members += g.total;
@@ -424,6 +435,7 @@ function networkStatus(db) {
   }
   const leaderOf = new Map(db.prepare(`SELECT n.id, COALESCE(lp.first_name || ' ' || lp.last_name, n.leader_name) AS leader_name, n.gender FROM networks n LEFT JOIN people lp ON lp.id = n.leader_person_id`).all().map((r) => [r.id, r]));
   const out = [...netOf.values()].map((n) => {
+    n.groups = n.groups.filter((g) => !g.is_leader_group); // the network leader's own group is the root, not a cell
     const ids = n.groups.map((g) => g.id);
     const ph = ids.map(() => '?').join(',');
     const sum = summarize(n.groups);
@@ -501,9 +513,10 @@ function overview(db, { weeks = 8 } = {}) {
   const networks = [...nets.values()].map((n) => ({ ...n, summary: summarize(n.groups), groups: n.groups.map((g) => ({ ...g, calendar: undefined })) }))
     .sort((a, b) => (a.id ? 0 : 1) - (b.id ? 0 : 1) || a.name.localeCompare(b.name));
   const people = db.prepare(`SELECT COUNT(*) AS n FROM people p WHERE p.archived_at IS NULL AND p.status <> 'inactive'
-      AND NOT EXISTS (SELECT 1 FROM lifegroup_memberships m WHERE m.person_id = p.id AND m.left_at IS NULL)`).get().n;
+      AND NOT EXISTS (SELECT 1 FROM lifegroup_memberships m WHERE m.person_id = p.id AND m.left_at IS NULL)
+      AND NOT EXISTS (SELECT 1 FROM networks xn WHERE xn.leader_person_id = p.id AND xn.is_active = 1)`).get().n;
   return { weeks: recentWeeks(db, weeks, s), target: target(s), summary: { ...summarize(rows), without_group: people, networks: networks.filter((n) => n.id).length },
     networks, groups: rows, boys: summarize(rows.filter((g) => g.gender === 'boys')), girls: summarize(rows.filter((g) => g.gender === 'girls')) };
 }
 
-module.exports = { settings, target, recentWeeks, mondayOf, addDays, churchToday, ensureToken, resetToken, groupByToken, members, memberWeeks, meetingsOf, calendar, progress, setTier, leaveMember, restoreMember, formerMembers, recordMeeting, maxMembers, assertRoom, NETWORK_LEADER_MAX, deleteMeeting, networkCalendar, leaderNetworkView, networkStatus, overview, summarize };
+module.exports = { settings, target, recentWeeks, mondayOf, addDays, churchToday, ensureToken, resetToken, groupByToken, members, memberWeeks, meetingsOf, calendar, progress, setTier, leaveMember, restoreMember, formerMembers, recordMeeting, maxMembers, assertRoom, assertNotNetworkLeader, NETWORK_LEADER_MAX, deleteMeeting, networkCalendar, leaderNetworkView, networkStatus, structureTiles, overview, summarize };

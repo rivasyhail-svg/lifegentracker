@@ -70,11 +70,12 @@ export async function renderDashboard({ main }) {
       <div class="card__header"><h2>Lifegroup overview</h2><a class="small" href="#/lifegroups?tab=needs">Needs Lifegroup ${icon('chevR', 13)}</a></div>
       <div class="card__body">
         <div class="kpi-row" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr))">
-          ${d.lifegroups.networks != null ? html`<a class="kpi kpi--link" href="#/lifegroups?tab=networks"><b>${fmtNum(d.lifegroups.networks)}</b><span>Networks</span></a>` : ''}
-          <a class="kpi kpi--link" href="#/lifegroups"><b>${fmtNum(d.lifegroups.active_groups)}</b><span>Lifegroups</span>${d.lifegroups.boys_groups != null ? html`<div class="small muted" style="text-transform:none;letter-spacing:0;font-weight:500">${d.lifegroups.boys_groups} boys · ${d.lifegroups.girls_groups} girls</div>` : ''}</a>
-          <a class="kpi kpi--link" href="#/lifegroups?tab=networks"><b>${fmtNum(d.lifegroups.total_leaders)}</b><span>Leaders</span></a>
-          ${d.lifegroups.closed_cell != null ? html`<a class="kpi kpi--link kpi--teal" href="#/reports?view=lifegroups"><b>${fmtNum(d.lifegroups.closed_cell)}</b><span>Closed cell</span></a>
-          <a class="kpi kpi--link" href="#/lifegroups?tab=progress"><b>${fmtNum(d.lifegroups.open_cell)}</b><span>Open cell</span></a>` : ''}
+          ${(() => { const st = d.lifegroups.structure || { networks: d.lifegroups.networks || 0, cell_leaders: 0, lifegroups: d.lifegroups.active_groups, closed_cell: d.lifegroups.closed_cell || 0, open_cell: d.lifegroups.open_cell || 0 }; return html`
+          <a class="kpi kpi--link" href="#/lifegroups"><b>${fmtNum(st.networks)}</b><span>Networks</span></a>
+          <a class="kpi kpi--link" href="#/lifegroups"><b>${fmtNum(st.cell_leaders)}</b><span>Cell leaders</span></a>
+          <a class="kpi kpi--link" href="#/lifegroups"><b>${fmtNum(st.lifegroups)}</b><span>Lifegroups</span></a>
+          <a class="kpi kpi--link kpi--teal" href="#/reports?view=lifegroups"><b>${fmtNum(st.closed_cell)}</b><span>Closed cell</span></a>
+          <a class="kpi kpi--link" href="#/lifegroups?tab=progress"><b>${fmtNum(st.open_cell)}</b><span>Open cell</span></a>`; })()}
           <a class="kpi kpi--link ${d.lifegroups.without_group ? 'kpi--amber' : ''}" href="#/lifegroups?tab=needs"><b>${fmtNum(d.lifegroups.without_group)}</b><span>Without Lifegroup</span></a>
           <a class="kpi kpi--link" href="#/lifegroups?tab=needs"><b>${fmtNum(d.lifegroups.new_needing_connection)}</b><span>New, needs connection</span></a>
         </div>

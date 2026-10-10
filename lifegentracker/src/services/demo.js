@@ -94,10 +94,11 @@ function load(db, userId) {
     // one of them has a move in their history so the UI shows it.
     // Networks and groups are never mixed: a boys network holds boys groups (male leaders/members), a girls network girls groups.
     const males = people.filter((p) => p.sex === 'male'), females = people.filter((p) => p.sex === 'female');
-    const insertNet = db.prepare(`INSERT INTO networks (name, gender, leader_person_id, parent_network_id, notes, is_demo, created_by) VALUES (?, ?, ?, ?, 'DEMO DATA', 1, ?)`);
+    // two independent demo networks (networks never nest)
+    const insertNet = db.prepare(`INSERT INTO networks (name, gender, leader_person_id, notes, is_demo, created_by) VALUES (?, ?, ?, 'DEMO DATA', 1, ?)`);
     // Every Network has the same shape: network leader → their Lifegroup (= the cell leaders) → each cell leader's own Lifegroup.
-    const netA = insertNet.run('Demo Network A (boys)', 'boys', males[9].id, null, userId).lastInsertRowid;
-    const netB = insertNet.run('Demo Network B (girls)', 'girls', females[9].id, null, userId).lastInsertRowid;
+    const netA = insertNet.run('Demo Network A (boys)', 'boys', males[9].id, userId).lastInsertRowid;
+    const netB = insertNet.run('Demo Network B (girls)', 'girls', females[9].id, userId).lastInsertRowid;
     const insertGroup = db.prepare(`INSERT INTO lifegroups (name, gender, leader_person_id, network_id, network_manual, network, area, schedule_day, schedule_time, category, capacity, venue, notes, is_demo, created_by)
       VALUES (@name, @gender, @leader, @network_id, 1, @network, @area, @day, @time, @category, @capacity, @venue, 'DEMO DATA', 1, @uid)`);
     const groups = [
@@ -108,8 +109,8 @@ function load(db, userId) {
     ].map((g) => insertGroup.run({ ...g, uid: userId }).lastInsertRowid);
     const [JOSHUA, RUTH, DAVID, ESTHER] = groups;
     // the network leaders' own Lifegroups: their members are the cell leaders (max 6)
-    const NET_A_LG = insertGroup.run({ name: 'Demo Network A Leaders', gender: 'boys', leader: males[9].id, network_id: null, network: null, area: 'Kaybanban', day: 'sun', time: '13:00', category: 'Leaders', capacity: null, venue: 'Demo venue 5', uid: userId }).lastInsertRowid;
-    const NET_B_LG = insertGroup.run({ name: 'Demo Network B Leaders', gender: 'girls', leader: females[9].id, network_id: null, network: null, area: 'Kaybanban', day: 'sun', time: '13:00', category: 'Leaders', capacity: null, venue: 'Demo venue 6', uid: userId }).lastInsertRowid;
+    const NET_A_LG = insertGroup.run({ name: 'Demo Network A Leaders', gender: 'boys', leader: males[9].id, network_id: netA, network: 'Demo Network A (boys)', area: 'Kaybanban', day: 'sun', time: '13:00', category: 'Leaders', capacity: null, venue: 'Demo venue 5', uid: userId }).lastInsertRowid;
+    const NET_B_LG = insertGroup.run({ name: 'Demo Network B Leaders', gender: 'girls', leader: females[9].id, network_id: netB, network: 'Demo Network B (girls)', area: 'Kaybanban', day: 'sun', time: '13:00', category: 'Leaders', capacity: null, venue: 'Demo venue 6', uid: userId }).lastInsertRowid;
     const leaderOf = new Map([[males[3].id, JOSHUA], [females[3].id, RUTH], [males[7].id, DAVID], [females[10].id, ESTHER], [males[9].id, NET_A_LG], [females[9].id, NET_B_LG]]);
     const insertM = db.prepare("INSERT INTO lifegroup_memberships (person_id, lifegroup_id, role, tier, joined_at, left_at, assigned_by) VALUES (?, ?, ?, 'new', ?, ?, ?)");
     const cellLeaderOf = new Map([[males[3].id, NET_A_LG], [males[7].id, NET_A_LG], [females[3].id, NET_B_LG], [females[10].id, NET_B_LG]]);

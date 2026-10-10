@@ -16,6 +16,9 @@ import { renderSettings } from './views/settings.js';
 import { renderLifegroups, renderLifegroup, renderNetwork } from './views/lifegroups.js';
 import { renderRegistrations, renderQrPoster, refreshPendingBadge } from './views/registrations.js';
 
+/** Shown in the sidebar so everyone can tell which build is running. Bump on every release. */
+export const APP_VERSION = '2026.10.10-3n';
+
 export const state = {
   user: null,
   settings: { church_name: 'Lifegiver Church of Faith', service_name: 'Lifegen / 3rd Service' },
@@ -112,7 +115,7 @@ function renderShell() {
     <aside class="sidebar" id="sidebar" aria-label="Main navigation">
       <a class="brand" href="#/dashboard">
         <span class="brand__mark">LG</span>
-        <span class="brand__text"><strong>LifegenTracker</strong><small>${esc(state.settings.church_name)}</small></span>
+        <span class="brand__text"><strong>LifegenTracker</strong><small>${esc(state.settings.church_name)}</small><small class="brand__ver" title="App version">v${APP_VERSION}</small></span>
       </a>
       <nav class="nav" id="nav">
         <div style="padding:4px 12px 10px">

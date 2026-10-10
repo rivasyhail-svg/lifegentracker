@@ -79,6 +79,7 @@ async function restoreJson(db, data, dbFile) {
       for (const row of rows) {
         const obj = {};
         for (const c of use) obj[c] = row[c] === undefined ? null : row[c];
+        if (t === 'networks' && obj.parent_network_id != null) obj.parent_network_id = null; // older backups could nest networks; networks are independent now
         stmt.run(obj);
       }
     }

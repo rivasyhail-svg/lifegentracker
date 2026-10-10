@@ -98,6 +98,14 @@ const SEX_OF = { boys: 'male', girls: 'female' };
 const GENDER_LABEL = { boys: 'boys group', girls: 'girls group' };
 /** Leader must match the group's gender; when changing gender, current members must all match. */
 function checkGenderRules(db, data, existingId = null) {
+  if (data.leader_person_id && data.network_id) {
+    // Independent networks: a Network leader's own Lifegroup can only live in their own Network.
+    const own = db.prepare('SELECT id, name FROM networks WHERE leader_person_id = ? AND is_active = 1 LIMIT 1').get(data.leader_person_id);
+    if (own && own.id !== data.network_id) {
+      const lp = db.prepare('SELECT first_name, last_name FROM people WHERE id = ?').get(data.leader_person_id);
+      throw new HttpError(400, `${lp ? lp.first_name + ' ' + lp.last_name : 'This leader'} leads ${own.name}. A Network leader is independent — their Lifegroup stays in their own Network and cannot be placed under another Network leader.`);
+    }
+  }
   if (data.network_id) {
     // a boys group can only sit in a boys network (and vice versa) — networks are never combined
     const net = db.prepare('SELECT name, gender FROM networks WHERE id = ?').get(data.network_id);
@@ -199,16 +207,22 @@ function overview(db) {
                           FROM lifegroups`).get();
   const leaders = db.prepare(`SELECT COUNT(DISTINCT leader_person_id) AS n FROM lifegroups WHERE is_active = 1 AND leader_person_id IS NOT NULL`).get().n
     + db.prepare(`SELECT COUNT(DISTINCT leader_name) AS n FROM lifegroups WHERE is_active = 1 AND leader_person_id IS NULL AND leader_name IS NOT NULL`).get().n;
+  // "connected" = in a Lifegroup, or the root of their own Network (network leaders are never "without Lifegroup")
   const p = db.prepare(`SELECT
       SUM(EXISTS (SELECT 1 FROM lifegroup_memberships m WHERE m.person_id = p.id AND m.left_at IS NULL)) AS with_group,
-      SUM(NOT EXISTS (SELECT 1 FROM lifegroup_memberships m WHERE m.person_id = p.id AND m.left_at IS NULL)) AS without_group,
-      SUM(NOT EXISTS (SELECT 1 FROM lifegroup_memberships m WHERE m.person_id = p.id AND m.left_at IS NULL)
+      SUM(NOT EXISTS (SELECT 1 FROM lifegroup_memberships m WHERE m.person_id = p.id AND m.left_at IS NULL) AND NOT EXISTS (SELECT 1 FROM networks xn WHERE xn.leader_person_id = p.id AND xn.is_active = 1)) AS without_group,
+      SUM(NOT EXISTS (SELECT 1 FROM lifegroup_memberships m WHERE m.person_id = p.id AND m.left_at IS NULL) AND NOT EXISTS (SELECT 1 FROM networks xn WHERE xn.leader_person_id = p.id AND xn.is_active = 1)
           AND p.date_registered >= date('now', '-60 days')) AS new_needing
     FROM people p WHERE p.archived_at IS NULL AND p.status <> 'inactive'`).get();
   const networks = db.prepare('SELECT COUNT(*) n FROM networks WHERE is_active = 1').get().n;
   const cells = db.prepare(`SELECT SUM(m.tier = 'solid') AS closed, SUM(m.tier <> 'solid') AS open FROM lifegroup_memberships m JOIN people p ON p.id = m.person_id JOIN lifegroups g ON g.id = m.lifegroup_id
       WHERE m.left_at IS NULL AND p.archived_at IS NULL AND g.is_active = 1`).get();
+  // church-structure numbers (network leaders' own groups hold the cell leaders, so they are not open/closed cell)
+  const st = prog.structureTiles(db);
+  const structure = { networks: st.boys.networks + st.girls.networks, cell_leaders: st.boys.cell_leaders + st.girls.cell_leaders, lifegroups: st.boys.lifegroups + st.girls.lifegroups,
+    closed_cell: st.boys.closed_cell + st.girls.closed_cell, open_cell: st.boys.open_cell + st.girls.open_cell, boys: st.boys, girls: st.girls };
   return {
+    structure,
     networks, closed_cell: Number(cells.closed) || 0, open_cell: Number(cells.open) || 0,
     total_groups: g.total || 0, active_groups: g.active || 0, boys_groups: g.boys_groups || 0, girls_groups: g.girls_groups || 0, groups_with_slots: g.with_slots || 0, total_leaders: leaders || 0,
     with_group: p.with_group || 0, without_group: p.without_group || 0, new_needing_connection: p.new_needing || 0,
@@ -228,6 +242,7 @@ router.get('/needs', requirePermission('people:view'), wrap((req, res) => {
       FROM people p
      WHERE p.archived_at IS NULL AND p.status <> 'inactive'
        AND NOT EXISTS (SELECT 1 FROM lifegroup_memberships m WHERE m.person_id = p.id AND m.left_at IS NULL)
+       AND NOT EXISTS (SELECT 1 FROM networks xn WHERE xn.leader_person_id = p.id AND xn.is_active = 1)
        ${q ? "AND (p.first_name || ' ' || p.last_name LIKE @q OR p.person_code LIKE @q)" : ''}
      ORDER BY last_attended IS NULL, last_attended DESC, p.date_registered DESC LIMIT ${limit}`).all(q ? { q: `%${q}%` } : {});
   res.json(rows);
@@ -393,7 +408,7 @@ function assign(db, user, { personId, groupId, joinedAt, role, notes }) {
   if (role && !['member', 'leader', 'assistant'].includes(role)) throw new HttpError(400, 'Invalid role.');
   const cur = db.prepare('SELECT * FROM lifegroup_memberships WHERE person_id = ? AND left_at IS NULL').get(p.id);
   if (cur && cur.lifegroup_id === g.id) return { person: p, group: g, unchanged: true };
-  prog.assertRoom(db, g.id, g.name); // group capacity, and the 6-member rule for a network leader's own group
+  prog.assertRoom(db, g.id, g.name, p.id); // 6-member rule for a network leader's own group; a Network leader is never a member
   db.transaction(() => {
     if (cur) db.prepare('UPDATE lifegroup_memberships SET left_at = ? WHERE id = ?').run(date, cur.id);
     db.prepare('INSERT INTO lifegroup_memberships (person_id, lifegroup_id, role, joined_at, notes, assigned_by) VALUES (?, ?, ?, ?, ?, ?)')

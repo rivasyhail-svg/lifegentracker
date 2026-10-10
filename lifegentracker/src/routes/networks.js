@@ -3,6 +3,11 @@
 /**
  * Networks: the layer above Lifegroups. Each Network has a leader; each Lifegroup
  * belongs to a Network, so a Lifegroup leader "reports to" the Network leader.
+ *
+ * NON-NEGOTIABLE: every Network is an independent root. A Network leader is never under
+ * another Network leader and there are no sub-networks — enforced here (requests carrying a
+ * parent are rejected), in the database (trigger / CHECK: parent_network_id must be NULL) and
+ * in the UI (no parent picker, separate cards per Network).
  */
 const express = require('express');
 const { getDb } = require('../db');
@@ -10,39 +15,40 @@ const { clean, HttpError, wrap, intId } = require('../lib/util');
 const { requirePermission, can } = require('../middleware/auth');
 const activity = require('../services/activity');
 const prog = require('../services/lifegroup-progress');
+const { syncNetworks } = require('../services/networks-auto');
 
 const router = express.Router();
 const SEX_OF = { boys: 'male', girls: 'female' };
 const WORD = { boys: 'boys', girls: 'girls' };
 
+// "not the network leader's own Lifegroup" (that group holds the cell leaders, so it is counted separately)
+const NOT_OWN = '(n.leader_person_id IS NULL OR g.leader_person_id IS NULL OR g.leader_person_id <> n.leader_person_id)';
 const NET_SELECT = `
   SELECT n.*, lp.first_name AS lf, lp.last_name AS ll, lp.person_code AS leader_code, lp.contact_number AS leader_contact,
-         pn.name AS parent_name,
-         (SELECT COUNT(*) FROM lifegroups g WHERE g.network_id = n.id AND g.is_active = 1) AS group_count,
+         (SELECT COUNT(*) FROM lifegroups g WHERE g.network_id = n.id AND g.is_active = 1 AND ${NOT_OWN}) AS group_count,
          (SELECT COUNT(*) FROM lifegroup_memberships m JOIN lifegroups g ON g.id = m.lifegroup_id JOIN people p ON p.id = m.person_id
-           WHERE g.network_id = n.id AND m.left_at IS NULL AND p.archived_at IS NULL) AS people_count,
-         (SELECT COUNT(*) FROM networks c WHERE c.parent_network_id = n.id AND c.is_active = 1) AS child_count,
+           WHERE g.network_id = n.id AND m.left_at IS NULL AND p.archived_at IS NULL AND ${NOT_OWN}) AS people_count,
          (SELECT COUNT(*) FROM lifegroup_memberships m JOIN lifegroups g ON g.id = m.lifegroup_id JOIN people p ON p.id = m.person_id
-           WHERE g.network_id = n.id AND m.left_at IS NULL AND p.archived_at IS NULL AND p.sex = 'male') AS boys,
+           WHERE g.network_id = n.id AND m.left_at IS NULL AND p.archived_at IS NULL AND p.sex = 'male' AND ${NOT_OWN}) AS boys,
          (SELECT COUNT(*) FROM lifegroup_memberships m JOIN lifegroups g ON g.id = m.lifegroup_id JOIN people p ON p.id = m.person_id
-           WHERE g.network_id = n.id AND m.left_at IS NULL AND p.archived_at IS NULL AND p.sex = 'female') AS girls,
-         (SELECT COUNT(*) FROM lifegroups g WHERE g.network_id = n.id AND g.is_active = 1 AND g.gender = 'boys') AS boys_groups,
-         (SELECT COUNT(*) FROM lifegroups g WHERE g.network_id = n.id AND g.is_active = 1 AND g.gender = 'girls') AS girls_groups,
+           WHERE g.network_id = n.id AND m.left_at IS NULL AND p.archived_at IS NULL AND p.sex = 'female' AND ${NOT_OWN}) AS girls,
+         (SELECT COUNT(*) FROM lifegroups g WHERE g.network_id = n.id AND g.is_active = 1 AND g.gender = 'boys' AND ${NOT_OWN}) AS boys_groups,
+         (SELECT COUNT(*) FROM lifegroups g WHERE g.network_id = n.id AND g.is_active = 1 AND g.gender = 'girls' AND ${NOT_OWN}) AS girls_groups,
          (SELECT COUNT(DISTINCT COALESCE('p' || g.leader_person_id, 'n' || g.leader_name)) FROM lifegroups g
-           WHERE g.network_id = n.id AND g.is_active = 1 AND (g.leader_person_id IS NOT NULL OR g.leader_name IS NOT NULL)) AS leader_count,
+           WHERE g.network_id = n.id AND g.is_active = 1 AND (g.leader_person_id IS NOT NULL OR g.leader_name IS NOT NULL) AND ${NOT_OWN}) AS leader_count,
          (SELECT COUNT(*) FROM lifegroup_memberships m JOIN lifegroups g ON g.id = m.lifegroup_id JOIN people p ON p.id = m.person_id
            WHERE n.leader_person_id IS NOT NULL AND g.leader_person_id = n.leader_person_id AND g.is_active = 1 AND m.left_at IS NULL AND p.archived_at IS NULL) AS cell_leaders,
          (SELECT COUNT(*) FROM lifegroup_memberships m JOIN lifegroups g ON g.id = m.lifegroup_id JOIN people p ON p.id = m.person_id
-           WHERE g.network_id = n.id AND g.is_active = 1 AND m.left_at IS NULL AND p.archived_at IS NULL AND m.tier = 'solid') AS closed_cell,
+           WHERE g.network_id = n.id AND g.is_active = 1 AND m.left_at IS NULL AND p.archived_at IS NULL AND m.tier = 'solid' AND ${NOT_OWN}) AS closed_cell,
          (SELECT MAX(mt.meeting_date) FROM lifegroup_meetings mt JOIN lifegroups g ON g.id = mt.lifegroup_id WHERE g.network_id = n.id AND mt.held = 1) AS last_held
     FROM networks n
-    LEFT JOIN people lp ON lp.id = n.leader_person_id
-    LEFT JOIN networks pn ON pn.id = n.parent_network_id`;
+    LEFT JOIN people lp ON lp.id = n.leader_person_id`;
 
 function shape(n, user) {
   if (!n) return n;
   const out = { ...n, leader_name: n.leader_person_id ? `${n.lf} ${n.ll}` : n.leader_name };
-  for (const k of ['group_count', 'people_count', 'child_count', 'boys', 'girls', 'boys_groups', 'girls_groups', 'leader_count', 'cell_leaders', 'closed_cell']) if (out[k] != null) out[k] = Number(out[k]);
+  delete out.parent_network_id; // networks are independent roots — there is no parent
+  for (const k of ['group_count', 'people_count', 'boys', 'girls', 'boys_groups', 'girls_groups', 'leader_count', 'cell_leaders', 'closed_cell']) if (out[k] != null) out[k] = Number(out[k]);
   out.open_cell = Math.max(0, (out.people_count || 0) - (out.closed_cell || 0));
   if (!can(user, 'people:view_private')) out.leader_contact = undefined;
   delete out.lf; delete out.ll;
@@ -56,12 +62,18 @@ function validate(db, body, existing = null) {
     name: clean(src.name),
     leader_person_id: src.leader_person_id ? Number(src.leader_person_id) : null,
     leader_name: clean(src.leader_name),
-    parent_network_id: src.parent_network_id ? Number(src.parent_network_id) : null,
     notes: clean(src.notes),
     gender: clean(src.gender) || null,
     is_active: src.is_active === undefined ? 1 : (src.is_active ? 1 : 0),
   };
   const errors = [];
+  // Independent networks: any attempt to nest (parent_network_id / parent_id / parent) is refused outright.
+  for (const k of ['parent_network_id', 'parent_id', 'parent']) {
+    if (body[k] !== undefined && body[k] !== null && body[k] !== '' && body[k] !== 0 && body[k] !== '0') {
+      errors.push('Networks are independent — a Network leader is always the root of their own Network and can never be placed under another Network leader.');
+      break;
+    }
+  }
   if (!data.name) errors.push('Network name is required.');
   // A Network is either a boys network or a girls network — never combined.
   if (!['boys', 'girls'].includes(data.gender)) errors.push('Choose whether this is a boys network or a girls network.');
@@ -71,24 +83,20 @@ function validate(db, body, existing = null) {
     if (!lp) errors.push('Leader must be a registered person.');
     else if (data.gender && lp.sex && lp.sex !== SEX_OF[data.gender]) errors.push(`${lp.first_name} ${lp.last_name} cannot lead a ${word} network — networks are never mixed.`);
     else if (data.gender && !lp.sex) errors.push(`Set Boy or Girl on ${lp.first_name} ${lp.last_name}'s profile first.`);
+    if (lp) {
+      // one person = one independent Network
+      const other = db.prepare('SELECT id, name FROM networks WHERE leader_person_id = ? AND is_active = 1 AND id <> ?').get(data.leader_person_id, existing ? existing.id : 0);
+      if (other) errors.push(`${lp.first_name} ${lp.last_name} already leads ${other.name}. A Network leader has exactly one independent Network — pick another leader or edit that Network instead.`);
+      // a Network leader is a root: they cannot sit inside another leader's Lifegroup
+      const inGroup = db.prepare(`SELECT g.name, COALESCE(l.first_name || ' ' || l.last_name, g.leader_name) AS leader FROM lifegroup_memberships m JOIN lifegroups g ON g.id = m.lifegroup_id
+          LEFT JOIN people l ON l.id = g.leader_person_id WHERE m.person_id = ? AND m.left_at IS NULL AND g.is_active = 1 AND (g.leader_person_id IS NULL OR g.leader_person_id <> ?) LIMIT 1`).get(data.leader_person_id, data.leader_person_id);
+      if (inGroup) errors.push(`${lp.first_name} ${lp.last_name} is still a member of ${inGroup.name}${inGroup.leader ? ' (' + inGroup.leader + ')' : ''}. A Network leader is independent and cannot be under another leader — remove them from that Lifegroup first.`);
+    }
   }
   if (existing && data.gender && data.gender !== existing.gender) {
     // flipping the type is only allowed when nothing inside would become mixed
     const badGroups = db.prepare("SELECT COUNT(*) AS n FROM lifegroups WHERE network_id = ? AND is_active = 1 AND gender IS NOT NULL AND gender <> ?").get(existing.id, data.gender).n;
-    const badKids = db.prepare("SELECT COUNT(*) AS n FROM networks WHERE parent_network_id = ? AND is_active = 1 AND gender IS NOT NULL AND gender <> ?").get(existing.id, data.gender).n;
     if (badGroups) errors.push(`This network still has ${badGroups} ${data.gender === 'boys' ? 'girls' : 'boys'} group${badGroups === 1 ? '' : 's'} — move them to another network first.`);
-    if (badKids) errors.push(`This network still has ${badKids} ${data.gender === 'boys' ? 'girls' : 'boys'} sub-network${badKids === 1 ? '' : 's'} — move them first.`);
-  }
-  if (data.parent_network_id) {
-    const parent = db.prepare('SELECT id, name, gender FROM networks WHERE id = ?').get(data.parent_network_id);
-    if (existing && data.parent_network_id === existing.id) errors.push('A network cannot be its own parent.');
-    else if (!parent) errors.push('Parent network not found.');
-    else if (data.gender && parent.gender && parent.gender !== data.gender) errors.push(`${parent.name} is a ${WORD[parent.gender]} network — a ${word} network cannot be under it.`);
-    else if (existing) {
-      // prevent cycles: walk up from the chosen parent
-      let cur = data.parent_network_id; let hops = 0;
-      while (cur && hops++ < 50) { if (cur === existing.id) { errors.push('That parent would create a loop.'); break; } cur = db.prepare('SELECT parent_network_id AS p FROM networks WHERE id = ?').get(cur)?.p; }
-    }
   }
   if (errors.length) throw new HttpError(400, errors.join(' '), errors);
   return data;
@@ -99,21 +107,13 @@ router.get('/', requirePermission('lifegroups:view'), wrap((req, res) => {
   const db = getDb();
   const status = clean(req.query.status) || 'active';
   const where = status === 'active' ? 'WHERE n.is_active = 1' : status === 'inactive' ? 'WHERE n.is_active = 0' : '';
-  const rows = db.prepare(`${NET_SELECT} ${where} ORDER BY n.is_active DESC, n.parent_network_id IS NOT NULL, n.name COLLATE NOCASE`).all().map((n) => shape(n, req.user));
+  const rows = db.prepare(`${NET_SELECT} ${where} ORDER BY n.is_active DESC, n.name COLLATE NOCASE`).all().map((n) => shape(n, req.user));
   res.json(withTotals(rows));
 }));
 
-/** Adds total_* fields = own counts + every descendant network's counts (so a main network shows the whole tree). */
+/** total_* fields — kept for API compatibility. Networks are independent, so totals = the network's own counts. */
 function withTotals(rows) {
-  const byParent = new Map();
-  rows.forEach((n) => { const k = n.parent_network_id || 0; if (!byParent.has(k)) byParent.set(k, []); byParent.get(k).push(n); });
-  const sum = (n, depth = 0) => {
-    const t = { total_groups: n.group_count, total_people: n.people_count, total_boys: n.boys, total_girls: n.girls, total_leaders: n.leader_count, total_boys_groups: n.boys_groups, total_girls_groups: n.girls_groups };
-    if (depth < 20) for (const c of byParent.get(n.id) || []) { const ct = sum(c, depth + 1); for (const k of Object.keys(t)) t[k] += ct[k]; }
-    Object.assign(n, t);
-    return t;
-  };
-  rows.filter((n) => !n.parent_network_id || !rows.some((x) => x.id === n.parent_network_id)).forEach((n) => sum(n));
+  for (const n of rows) Object.assign(n, { total_groups: n.group_count, total_people: n.people_count, total_boys: n.boys, total_girls: n.girls, total_leaders: n.leader_count, total_boys_groups: n.boys_groups, total_girls_groups: n.girls_groups });
   return rows;
 }
 
@@ -122,7 +122,7 @@ router.get('/:id/calendar', requirePermission('lifegroups:view'), wrap((req, res
   res.json(prog.networkCalendar(getDb(), intId(req.params.id), { weeks: Math.min(Math.max(Number(req.query.weeks) || 8, 4), 26), withMembers: req.query.members === '1' }));
 }));
 
-// GET /api/networks/:id — network + its groups (with leaders) + child networks
+// GET /api/networks/:id — one independent network: its leader, its Lifegroups (with leaders + members). Never other networks.
 router.get('/:id', requirePermission('lifegroups:view'), wrap((req, res) => {
   const db = getDb();
   const n = getNetwork(db, intId(req.params.id), req.user);
@@ -130,27 +130,30 @@ router.get('/:id', requirePermission('lifegroups:view'), wrap((req, res) => {
   const groups = db.prepare(`
     SELECT g.id, g.name, g.gender, g.area, g.schedule_day, g.schedule_time, g.capacity, g.is_active, g.leader_person_id,
            COALESCE(lp.first_name || ' ' || lp.last_name, g.leader_name) AS leader_name,
+           CASE WHEN g.leader_person_id IS NOT NULL AND g.leader_person_id = ? THEN 1 ELSE 0 END AS is_leader_group,
            (SELECT COUNT(*) FROM lifegroup_memberships m JOIN people p ON p.id = m.person_id WHERE m.lifegroup_id = g.id AND m.left_at IS NULL AND p.archived_at IS NULL) AS member_count
       FROM lifegroups g LEFT JOIN people lp ON lp.id = g.leader_person_id
-     WHERE g.network_id = ? ORDER BY g.is_active DESC, g.name COLLATE NOCASE`).all(n.id);
+     WHERE g.network_id = ? ORDER BY g.is_active DESC, g.name COLLATE NOCASE`).all(n.leader_person_id || 0, n.id);
   const memberStmt = db.prepare(`SELECT p.id, p.person_code, p.first_name, p.last_name, p.photo, p.sex, p.status, m.role, m.tier, m.joined_at
       FROM lifegroup_memberships m JOIN people p ON p.id = m.person_id
      WHERE m.lifegroup_id = ? AND m.left_at IS NULL AND p.archived_at IS NULL
      ORDER BY m.role = 'member', p.last_name COLLATE NOCASE, p.first_name COLLATE NOCASE`);
   for (const g of groups) {
+    g.is_leader_group = Boolean(Number(g.is_leader_group));
     g.members = memberStmt.all(g.id);
     g.boys = g.members.filter((m) => m.sex === 'male').length;
     g.girls = g.members.filter((m) => m.sex === 'female').length;
   }
-  const children = withTotals(db.prepare(`${NET_SELECT} WHERE n.parent_network_id = ? ORDER BY n.name COLLATE NOCASE`).all(n.id).map((c) => shape(c, req.user)));
-  res.json({ ...n, groups, children });
+  res.json({ ...n, groups });
 }));
 
 router.post('/', requirePermission('lifegroups:manage'), wrap((req, res) => {
   const db = getDb();
   const data = validate(db, req.body || {});
-  const info = db.prepare(`INSERT INTO networks (name, gender, leader_person_id, leader_name, parent_network_id, notes, is_active, created_by)
-    VALUES (@name, @gender, @leader_person_id, @leader_name, @parent_network_id, @notes, @is_active, @created_by)`).run({ ...data, created_by: req.user.id });
+  // Always a new independent root: never attached to a selected / current / previously created network.
+  const info = db.prepare(`INSERT INTO networks (name, gender, leader_person_id, leader_name, notes, is_active, created_by)
+    VALUES (@name, @gender, @leader_person_id, @leader_name, @notes, @is_active, @created_by)`).run({ ...data, created_by: req.user.id });
+  syncNetworks(db, req.user); // the leader's own Lifegroup (if any) moves into this network
   const n = getNetwork(db, info.lastInsertRowid, req.user);
   activity.log(db, req.user, 'network.create', 'network', n.id, `Created ${n.gender} Network ${n.name}${n.leader_name ? ' (leader ' + n.leader_name + ')' : ''}`);
   res.status(201).json(n);
@@ -162,20 +165,21 @@ router.put('/:id', requirePermission('lifegroups:manage'), wrap((req, res) => {
   const existing = db.prepare('SELECT * FROM networks WHERE id = ?').get(id);
   if (!existing) throw new HttpError(404, 'Network not found.');
   const data = validate(db, req.body || {}, existing);
-  db.prepare(`UPDATE networks SET name=@name, gender=@gender, leader_person_id=@leader_person_id, leader_name=@leader_name, parent_network_id=@parent_network_id,
+  db.prepare(`UPDATE networks SET name=@name, gender=@gender, leader_person_id=@leader_person_id, leader_name=@leader_name,
       notes=@notes, is_active=@is_active, updated_at=datetime('now') WHERE id=@id`).run({ ...data, id });
+  syncNetworks(db, req.user);
   activity.log(db, req.user, 'network.update', 'network', id, `Edited Network ${data.name}`);
   res.json(getNetwork(db, id, req.user));
 }));
 
-// DELETE — admin; only when no groups/children reference it
+// DELETE — admin; only when no Lifegroups reference it
 router.delete('/:id', requirePermission('people:delete'), wrap((req, res) => {
   const db = getDb();
   const id = intId(req.params.id);
   const n = db.prepare('SELECT name FROM networks WHERE id = ?').get(id);
   if (!n) throw new HttpError(404, 'Network not found.');
-  const used = db.prepare('SELECT (SELECT COUNT(*) FROM lifegroups WHERE network_id = ?) + (SELECT COUNT(*) FROM networks WHERE parent_network_id = ?) AS n').get(id, id).n;
-  if (used) throw new HttpError(409, 'This Network still has Lifegroups or sub-networks. Move them first or mark the Network inactive.');
+  const used = db.prepare('SELECT COUNT(*) AS n FROM lifegroups WHERE network_id = ?').get(id).n;
+  if (used) throw new HttpError(409, 'This Network still has Lifegroups. Move them first or mark the Network inactive.');
   db.prepare('DELETE FROM networks WHERE id = ?').run(id);
   activity.log(db, req.user, 'network.delete', 'network', id, `Deleted empty Network ${n.name}`);
   res.status(204).end();
@@ -185,9 +189,10 @@ router.delete('/:id', requirePermission('people:delete'), wrap((req, res) => {
 function leadershipFor(db, personId) {
   const leads_groups = db.prepare(`SELECT g.id, g.name, g.area, g.network_id, n.name AS network_name FROM lifegroups g LEFT JOIN networks n ON n.id = g.network_id
     WHERE g.leader_person_id = ? AND g.is_active = 1 ORDER BY g.name`).all(personId);
-  const leads_networks = db.prepare(`SELECT id, name, parent_network_id FROM networks WHERE leader_person_id = ? AND is_active = 1 ORDER BY name`).all(personId);
-  // Who they report to: group leader of their current group → network leader of that group's network → parent network leader…
+  const leads_networks = db.prepare(`SELECT id, name FROM networks WHERE leader_person_id = ? AND is_active = 1 ORDER BY name`).all(personId);
+  // Who they report to: Lifegroup leader of their current group → that group's Network leader. A Network leader is a root (reports to no one).
   const chain = [];
+  if (leads_networks.length) return { leads_groups, leads_networks, reports_to: chain };
   const cur = db.prepare(`SELECT g.id AS group_id, g.name AS group_name, g.leader_person_id, COALESCE(lp.first_name || ' ' || lp.last_name, g.leader_name) AS leader_name, g.network_id
     FROM lifegroup_memberships m JOIN lifegroups g ON g.id = m.lifegroup_id LEFT JOIN people lp ON lp.id = g.leader_person_id
     WHERE m.person_id = ? AND m.left_at IS NULL`).get(personId);
@@ -196,15 +201,11 @@ function leadershipFor(db, personId) {
     if (cur.leader_person_id !== personId && cur.leader_name) chain.push({ level: 'Lifegroup leader', name: cur.leader_name, person_id: cur.leader_person_id, via: cur.group_name, group_id: cur.group_id });
     networkId = cur.network_id;
   } else if (leads_groups.length) networkId = leads_groups[0].network_id;
-  else if (leads_networks.length) networkId = leads_networks[0].parent_network_id;
-  let hops = 0;
-  while (networkId && hops++ < 20) {
-    const n = db.prepare(`SELECT n.id, n.name, n.parent_network_id, n.leader_person_id, COALESCE(lp.first_name || ' ' || lp.last_name, n.leader_name) AS leader_name
+  if (networkId) {
+    const n = db.prepare(`SELECT n.id, n.name, n.leader_person_id, COALESCE(lp.first_name || ' ' || lp.last_name, n.leader_name) AS leader_name
       FROM networks n LEFT JOIN people lp ON lp.id = n.leader_person_id WHERE n.id = ?`).get(networkId);
-    if (!n) break;
     const last = chain[chain.length - 1];
-    if (n.leader_person_id !== personId && n.leader_name && !(last && last.person_id && last.person_id === n.leader_person_id)) chain.push({ level: 'Network leader', name: n.leader_name, person_id: n.leader_person_id, via: n.name, network_id: n.id });
-    networkId = n.parent_network_id;
+    if (n && n.leader_person_id !== personId && n.leader_name && !(last && last.person_id && last.person_id === n.leader_person_id)) chain.push({ level: 'Network leader', name: n.leader_name, person_id: n.leader_person_id, via: n.name, network_id: n.id });
   }
   return { leads_groups, leads_networks, reports_to: chain };
 }

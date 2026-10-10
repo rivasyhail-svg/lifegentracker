@@ -79,9 +79,32 @@ function initDb() {
     // SQLite's "username COLLATE NOCASE" → case-insensitive unique index on Postgres.
     db.exec('CREATE UNIQUE INDEX IF NOT EXISTS uq_users_username_ci ON users (lower(username))');
   }
+  enforceIndependentNetworks(db);
 
   return db;
 }
+
+/**
+ * Database-level guarantee that Networks are independent roots (no sub-networks):
+ * networks.parent_network_id must stay NULL. The column is kept only so old rows and backups
+ * still load; nothing in the app reads or writes it any more.
+ *   - Postgres: CHECK constraint.
+ *   - SQLite / libSQL (no ADD CONSTRAINT): BEFORE INSERT / BEFORE UPDATE triggers that abort.
+ * Idempotent — safe to run on every start.
+ */
+function enforceIndependentNetworks(db) {
+  const MSG = 'Networks are independent: a Network cannot be placed under another Network';
+  if (IS_PG) {
+    const has = db.prepare("SELECT 1 AS ok FROM pg_constraint WHERE conname = 'ck_networks_independent'").get();
+    if (!has) db.exec('ALTER TABLE networks ADD CONSTRAINT ck_networks_independent CHECK (parent_network_id IS NULL)');
+    return;
+  }
+  db.exec(`CREATE TRIGGER IF NOT EXISTS trg_networks_independent_ins BEFORE INSERT ON networks
+    WHEN NEW.parent_network_id IS NOT NULL BEGIN SELECT RAISE(ABORT, '${MSG}'); END;`);
+  db.exec(`CREATE TRIGGER IF NOT EXISTS trg_networks_independent_upd BEFORE UPDATE OF parent_network_id ON networks
+    WHEN NEW.parent_network_id IS NOT NULL BEGIN SELECT RAISE(ABORT, '${MSG}'); END;`);
+}
+
 
 function getDb() {
   if (!db) initDb();

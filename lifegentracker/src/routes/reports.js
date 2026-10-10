@@ -194,7 +194,8 @@ function lifegroupReport(db) {
   const totals = groups.reduce((t, g) => ({ groups: t.groups + 1, boys_groups: t.boys_groups + (g.gender === 'boys'), girls_groups: t.girls_groups + (g.gender === 'girls'), members: t.members + g.members, boys: t.boys + g.boys, girls: t.girls + g.girls }), { groups: 0, boys_groups: 0, girls_groups: 0, members: 0, boys: 0, girls: 0 });
   // people not in any group, by sex — the "who still needs connecting" side of the ratio
   const nc = db.prepare(`SELECT SUM(sex = 'male') AS boys, SUM(sex = 'female') AS girls, COUNT(*) AS total FROM people p
-     WHERE p.archived_at IS NULL AND p.status <> 'inactive' AND NOT EXISTS (SELECT 1 FROM lifegroup_memberships m WHERE m.person_id = p.id AND m.left_at IS NULL)`).get();
+     WHERE p.archived_at IS NULL AND p.status <> 'inactive' AND NOT EXISTS (SELECT 1 FROM lifegroup_memberships m WHERE m.person_id = p.id AND m.left_at IS NULL)
+       AND NOT EXISTS (SELECT 1 FROM networks xn WHERE xn.leader_person_id = p.id AND xn.is_active = 1)`).get(); // network leaders are roots, not "not connected"
   // growth: per group, last 30 days (joins − leaves) and %
   const g30 = db.prepare(`SELECT g.id,
       (SELECT COUNT(*) FROM lifegroup_memberships m WHERE m.lifegroup_id = g.id AND m.joined_at >= date('now', '-30 days')) AS joined_30d,

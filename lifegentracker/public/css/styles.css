@@ -1044,3 +1044,15 @@ details[open] > summary .t-open { display: none; } details:not([open]) > summary
 .struct__tag { font-size: .66rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 650; min-width: 86px; }
 .struct__full { color: var(--red-600); }
 .struct__ok { color: var(--green-700, #15803d); }
+
+/* Lifegroups → Network tab: one block per Network */
+.netblock__head { align-items: flex-start; gap: 12px; }
+.netblock__head h2 a { color: inherit; }
+.netblock--boys { border-left: 3px solid #2563eb; }
+.netblock--girls { border-left: 3px solid #db2777; }
+.netblock--loose { border-left: 3px solid var(--border); }
+.row--lead td { background: var(--ink-50, #f8fafc); }
+.net-section { margin-bottom: 8px; }
+.brand__ver { display: block; font-size: .62rem; color: var(--muted); opacity: .8; letter-spacing: .02em; }
+.netblock .table td:first-child { white-space: normal; }
+.netblock .table th:last-child, .netblock .table td:last-child { padding-right: 16px; }

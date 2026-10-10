@@ -277,3 +277,24 @@ In **My cell leaders**, each name now shows a badge for *their* Lifegroup this w
 - "My cell leaders" header shows **n / 6 (max 6)**; each expanded cell leader shows *Closed cell x / 6 (solid ✓)* and *Open cell y*; the cell headers say *max 6 = solid* / *walang limit*.
 - Weekly report tab of a network leader: progress bar = **My cell leaders n / 6**; the "+ New cell leader this week" button disappears at 6 with the note *Puno na — max 6 cell leaders. Bawal pang-7.* (the server also refuses a 7th).
 - Front-end only (public/js/lifegroup.js, public/css/styles.css). Tests 78/78 on SQLite and Postgres.
+
+## Update 3l — one "Network" tab, version stamp (2026-10-10)
+- **Lifegroups page tabs are now: Network · Needs Lifegroup · Progress.** The old "Groups" and "Networks" tabs were merged into **Network**: Boys / Girls sections, one block per Network (name → network page & QR, network leader, cell leaders n/6, Lifegroups, members, closed/open cell) and under it the table of that Network's Lifegroups — the network leader's own Lifegroup first (tagged), then each cell leader's Lifegroup with Members · Closed cell x/6 · Open cell · Last held. Lifegroups without a Network are listed in a "No Network yet" block. Search / Boys / Girls / Active filters kept; old `?tab=networks` links land here.
+- **Version stamp**: the sidebar shows `v2026.10.10-3m` under the church name and `/api/health` returns `version` — if the sidebar shows an older or no version, the browser is still on cached files (open an Incognito window or clear cached files).
+- Tests 78/78 on SQLite and Postgres.
+
+## Update 3m — cleaner Lifegroups header (2026-10-10)
+- Removed the explanatory paragraph above the Network tab.
+- The six tiles on the Lifegroups page (and the Dashboard "Lifegroup overview") now follow the structure: **Networks · Cell leaders · Lifegroups · Closed cell · Open cell · Without Lifegroup**, each with boys · girls underneath. Closed / Open cell count only the cell leaders' Lifegroups (the network leaders' own Lifegroups hold the cell leaders, so they are no longer mixed into those numbers). `GET /api/lifegroups/overview` adds `structure`.
+- Version is now `v2026.10.10-3m`.
+
+## Update 3n — independent networks, no sub-networks (2026-10-10)
+**Rule (non-negotiable):** every Network leader is the root of their own independent Network. A Network leader is never under another Network leader; there are no sub-networks, parent networks or nested networks.
+
+Enforced in three layers:
+- **Database** — migration `013_networks_independent.sql` clears any old parent links (rows, leaders, Lifegroups and history are kept) and drops the parent index. On start the app adds a guard that the database itself enforces: Postgres `CHECK (parent_network_id IS NULL)` (`ck_networks_independent`), SQLite/libSQL `BEFORE INSERT/UPDATE` triggers that abort. Restoring an old backup that contained nested networks flattens them.
+- **Backend** — `POST/PUT /api/networks` refuse any `parent_network_id` / `parent_id` / `parent` (400 "Networks are independent…"); responses no longer carry `parent_network_id`, `parent_name`, `child_count` or `children`; `total_*` = the network's own counts. One person leads exactly one active Network. A person who is still a member of someone's Lifegroup cannot be made a Network leader (remove them first). A Network leader can never be added as a member of any Lifegroup (409). A Network leader's own Lifegroup always lives in their own Network — pinning it to another Network is refused (400). Auto-networks follow the membership chain up to the root leader only; nothing is ever nested. A Network leader "reports to" nobody and is never listed under "Needs Lifegroup". On start the server re-derives the Lifegroup → Network links once.
+- **Frontend** — one card per Network on the Lifegroups → Network tab (network leader's Lifegroup first, then the cell leaders' Lifegroups); the Network page shows only that Network (root = network leader with the cell leaders listed, children = cell leaders' Lifegroups); no parent picker anywhere; the Progress tab labels the network leader's Lifegroup and shows "n / 6 cell leaders" instead of a closed-cell badge.
+- Network counts (Lifegroups, members, Closed/Open cell) exclude the network leader's own Lifegroup (it holds the cell leaders, which are counted as "Cell leaders n / 6").
+- Tests: new "Independent networks" test covers the 7 required scenarios (create A, create B while A exists, several leaders, every way of nesting rejected via API, cells belong only to their network, no shared members/permissions, DB-level guard); 79/79 on SQLite and Postgres.
+- Version `v2026.10.10-3n`.

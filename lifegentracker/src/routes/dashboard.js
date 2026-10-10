@@ -74,6 +74,7 @@ router.get(
           FROM people p
          WHERE p.archived_at IS NULL AND p.status <> 'inactive'
            AND NOT EXISTS (SELECT 1 FROM lifegroup_memberships m WHERE m.person_id = p.id AND m.left_at IS NULL)
+           AND NOT EXISTS (SELECT 1 FROM networks xn WHERE xn.leader_person_id = p.id AND xn.is_active = 1)
          ORDER BY last_attended IS NULL, last_attended DESC, p.date_registered DESC LIMIT 6`).all(),
     });
   })
