@@ -10,6 +10,7 @@ const { requirePermission, can } = require('../middleware/auth');
 const activity = require('../services/activity');
 const { syncNetworks } = require('../services/networks-auto');
 const prog = require('../services/lifegroup-progress');
+const { publicBase } = require('../lib/public-url');
 const QRCode = require('qrcode');
 
 const router = express.Router();
@@ -271,11 +272,7 @@ router.get('/progress/overview', requirePermission('lifegroups:view'), wrap((req
 }));
 
 // GET /api/lifegroups/:id/progress — one group: members with tiers, calendar, meetings, leader link (managers only)
-function linkBase(db, req) {
-  const proto = req.headers['x-forwarded-proto'] || req.protocol;
-  const custom = clean(db.prepare("SELECT value FROM settings WHERE key = 'qr_public_url'").get()?.value);
-  return custom ? custom.replace(/\/+$/, '').replace(/\/register$/, '') : `${proto}://${req.get('host')}`;
-}
+const linkBase = (db, req) => publicBase(db, req);
 router.get('/:id/progress', requirePermission('lifegroups:view'), wrap(async (req, res) => {
   const db = getDb();
   const id = intId(req.params.id);

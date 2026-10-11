@@ -2,7 +2,7 @@
 // per-network grid and the overall Progress tab. Shared by lifegroups.js.
 import { api } from '../api.js';
 import { can } from '../app.js';
-import { html, raw, esc, icon, fmtDate, toISODate, toast, openModal, closeModal, confirmDialog, withLoading, emptyState, debounce } from '../ui.js';
+import { html, raw, esc, icon, fmtDate, toISODate, toast, openModal, closeModal, confirmDialog, withLoading, emptyState, debounce, copyText, previewLinkWarning } from '../ui.js';
 
 const DAY_SHORT = { mon: 'Mon', tue: 'Tue', wed: 'Wed', thu: 'Thu', fri: 'Fri', sat: 'Sat', sun: 'Sun' };
 export const weekLabel = (monday) => { const d = new Date(`${monday}T00:00:00`); return `${d.toLocaleDateString('en-US', { month: 'short' })} ${d.getDate()}`; };
@@ -124,6 +124,7 @@ export function linkDialog(groupId, p, onReset, { network = null } = {}) {
     body: `<div class="stack">
       <div class="qr-preview" id="lgQr" style="max-width:220px;margin:0 auto">${p.report_qr || ''}</div>
       <div class="field"><label>Link</label><input id="lgLinkUrl" readonly value="${esc(p.report_link || '')}" /></div>
+      ${previewLinkWarning(p.report_link).value}
       <div class="row" style="gap:8px;flex-wrap:wrap">
         <button class="btn btn--sm" id="lgCopy">${icon('copy', 14).value} Copy link</button>
         <a class="btn btn--sm" id="lgOpen" href="${esc(p.report_link || '#')}" target="_blank" rel="noopener">${icon('link', 14).value} Open</a>
@@ -134,10 +135,7 @@ export function linkDialog(groupId, p, onReset, { network = null } = {}) {
     footer: `<button class="btn" data-close>Close</button>`,
   });
   modal.querySelector('[data-close]').onclick = closeModal;
-  modal.querySelector('#lgCopy').onclick = async () => {
-    try { await navigator.clipboard.writeText(modal.querySelector('#lgLinkUrl').value); toast('Link copied.'); }
-    catch { modal.querySelector('#lgLinkUrl').select(); toast('Press Ctrl/Cmd+C to copy the selected link.', 'info'); }
-  };
+  modal.querySelector('#lgCopy').onclick = () => copyText(modal.querySelector('#lgLinkUrl').value, { label: 'Lifegroup link' });
   modal.querySelector('#lgPrint').onclick = () => {
     const w = window.open('', '_blank');
     if (!w) return toast('Allow pop-ups to print.', 'error');

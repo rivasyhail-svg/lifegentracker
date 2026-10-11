@@ -1,6 +1,6 @@
 import { api } from '../api.js';
 import { state, can } from '../app.js';
-import { html, raw, icon, toast, openModal, closeModal, confirmDialog, withLoading, formData, fmtDateTime, emptyState, debounce, downloadUrl } from '../ui.js';
+import { html, raw, icon, toast, openModal, closeModal, confirmDialog, withLoading, formData, fmtDateTime, emptyState, debounce, downloadUrl, copyText, previewLinkWarning } from '../ui.js';
 
 /**
  * QR self-registration — Admin inbox. Pending/rejected rows live only in `registrations`;
@@ -318,6 +318,7 @@ export async function renderQrCard(card) {
           ? html`<p class="small"><b>Rotating QR</b> — this code works only until <b>Sunday ${qr.valid_through}</b>. Print a fresh one every week (or tap “New QR code” to invalidate the current print immediately). The QR still contains only a link — never personal data.</p>`
           : html`<p class="small"><b>Reusable QR</b> — print it once and post it at the venue. The QR contains only this link, never personal data. Changing the rules below does not change the QR, so the same print keeps working.</p>`}
         <div class="qr-url" id="qrUrl">${qr.url}</div>
+        ${previewLinkWarning(qr.url)}
         <div class="row" style="gap:8px;flex-wrap:wrap">
           <button class="btn btn--sm" id="qrCopy">${icon('copy', 14)} Copy link</button>
           <button class="btn btn--sm" id="qrPng">${icon('download', 14)} Download PNG</button>
@@ -357,10 +358,7 @@ export async function renderQrCard(card) {
     <hr class="sep" />
     <div id="qrBlocks"><div class="loading">Loading blocklist…</div></div>`;
   const rerender = async () => { try { const st = await api.status(); if (st.settings) Object.assign(state.settings, st.settings); } catch { /* ignore */ } renderQrCard(card); };
-  card.querySelector('#qrCopy').onclick = async (e) => {
-    try { await navigator.clipboard.writeText(qr.url); toast('Link copied.'); }
-    catch { const r = document.createRange(); r.selectNodeContents(card.querySelector('#qrUrl')); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); toast('Press Ctrl/Cmd+C to copy the selected link.', 'info'); }
-  };
+  card.querySelector('#qrCopy').onclick = () => copyText(qr.url, { label: 'Registration link' });
   card.querySelector('#qrPng').onclick = (e) => withLoading(e.currentTarget, async () => {
     try {
       const blob = await api.blob('/api/qr/registration.png?size=1024');

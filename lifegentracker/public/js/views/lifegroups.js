@@ -3,7 +3,7 @@ import { renderProgressCard, renderNetworkCalendar, drawProgressTab, solidBadge,
 import { can } from '../app.js';
 import {
   html, raw, icon, avatar, fullName, statusBadge, fmtDate, fmtNum, emptyState, debounce, toast, confirmDialog,
-  openModal, closeModal, withLoading, formData, DAY_LABELS, DAY_SHORT, TIME_LABELS, fmtClock, fmtSchedule, toISODate,
+  openModal, closeModal, withLoading, formData, copyText, previewLinkWarning, DAY_LABELS, DAY_SHORT, TIME_LABELS, fmtClock, fmtSchedule, toISODate,
 } from '../ui.js';
 
 /**
@@ -208,6 +208,53 @@ export async function findLifegroup(person, onAssigned) {
 // ---------------------------------------------------------------------------
 // List page
 // ---------------------------------------------------------------------------
+
+/** "Add member" modal — shared by the Lifegroup page and the Network page (also used to add a cell leader). */
+export function addMemberDialog(g, onDone, { title = null, buttonText = 'Add to group', role = 'member' } = {}) {
+  const modal = openModal({
+    title: title || `Add member to ${g.name}`,
+    body: `<div class="field gsearch-field"><label>Person</label><div class="gsearch" style="max-width:none">${icon('search', 16).value}<input id="memberPick" aria-label="Search a person to add" placeholder="${g.gender ? `Search a ${g.gender === 'boys' ? 'boy' : 'girl'} by name or ID…` : 'Search by name or ID…'}" autocomplete="off" /></div><input type="hidden" id="memberId" />
+        <span class="help">Only registered people. A person can be in one Lifegroup at a time — adding them here moves them out of their current group.</span></div>
+      <div class="form-grid mt-1"><div class="field"><label>Joined on</label><input type="date" id="joinedAt" value="${toISODate(new Date())}" /></div>
+      <div class="field"><label>Role</label><select id="memberRole"><option value="member" ${role === 'member' ? 'selected' : ''}>Member</option><option value="assistant" ${role === 'assistant' ? 'selected' : ''}>Assistant</option><option value="leader" ${role === 'leader' ? 'selected' : ''}>Leader</option></select></div></div>`,
+    footer: `<button class="btn" data-close>Cancel</button><button class="btn btn--primary" id="saveMember">${buttonText}</button>`,
+  });
+  modal.querySelector('[data-close]').onclick = closeModal;
+  personPicker(modal, { inputId: 'memberPick', hiddenId: 'memberId', sex: SEX_OF[g.gender] || null });
+  modal.querySelector('#saveMember').onclick = (e) => withLoading(e.currentTarget, async () => {
+    const pid = Number(modal.querySelector('#memberId').value);
+    if (!pid) return toast('Choose a registered person first.', 'error');
+    try {
+      const r = await api.assignLifegroup(g.id, pid, { joined_at: modal.querySelector('#joinedAt').value, role: modal.querySelector('#memberRole').value });
+      closeModal(); toast(r.unchanged ? 'Already a member of this group.' : 'Member added.'); onDone(r);
+    } catch (ex) { toast(ex.message, 'error'); }
+  });
+}
+
+/** Per-person edit menu used inside member lists: Move to another Lifegroup · Remove · Edit profile. */
+function memberActions(m, g, refresh) {
+  return html`<button class="btn btn--ghost btn--sm" data-move="${m.id}" data-gid="${g.id}" title="Move to another Lifegroup">Move</button> <button class="btn btn--ghost btn--sm" data-leave="${m.id}" data-gid="${g.id}" data-name="${fullName(m)}" data-gname="${g.name}" title="Remove from ${g.name}">Remove</button> <a class="btn btn--ghost btn--sm" href="#/people/${m.id}/edit" title="Edit this person's details">Edit</a> `;
+}
+function bindMemberActions(root, groupsById, refresh) {
+  root.querySelectorAll('[data-leave]').forEach((b) => {
+    b.onclick = async (e) => {
+      e.preventDefault();
+      const ok = await confirmDialog({ title: `Remove ${b.dataset.name} from ${b.dataset.gname}?`, message: 'They will be marked as left today. The membership stays in their history and they can be added again.', confirmText: 'Remove', danger: true });
+      if (!ok) return;
+      try { await api.leaveLifegroup(Number(b.dataset.gid), Number(b.dataset.leave)); toast('Removed.', 'info'); refresh(); } catch (ex) { toast(ex.message, 'error'); }
+    };
+  });
+  root.querySelectorAll('[data-move]').forEach((b) => {
+    b.onclick = (e) => {
+      e.preventDefault();
+      const g = groupsById.get(Number(b.dataset.gid));
+      const m = g && g.members.find((x) => x.id === Number(b.dataset.move));
+      if (!m) return;
+      findLifegroup({ ...m, lifegroup: { id: g.id, name: g.name } }, refresh);
+    };
+  });
+}
+
 export async function renderLifegroups({ main, query }) {
   const tab = ['needs', 'progress'].includes(query.tab) ? query.tab : 'groups'; // 'groups' = the Network tab (old ?tab=networks lands here too)
   const filters = { q: query.q || '', status: query.status || 'active', gender: query.gender || '' };
@@ -411,7 +458,7 @@ export async function renderLifegroup({ main }, id) {
               <td data-label="Closed cell" class="num nowrap">${lg ? (lg.solid_count >= g.solid_target ? raw(`<span class="badge badge--present badge--nodot" title="Solid Lifegroup">${lg.solid_count}</span>`) : html`<span class="nowrap">${lg.solid_count}<span class="muted small">/${g.solid_target}</span></span>`) : '—'}</td>
               <td data-label="Open cell" class="num">${lg ? lg.member_count - lg.solid_count : '—'}</td>
               <td data-label="Last held" class="small nowrap">${lg && lg.last_held ? fmtDate(lg.last_held, { short: true }) : raw('<span class="muted">—</span>')}</td>
-              ${manage ? html`<td data-label="" class="actions nowrap"><button class="btn btn--ghost btn--sm" data-leave="${m.id}" data-name="${fullName(m)}">Remove</button></td>` : ''}
+              ${manage ? html`<td data-label="" class="actions nowrap">${memberActions(m, g)}</td>` : ''}
             </tr>`; })}</tbody></table></div>
             <div class="card__footer small muted">${dotsKey()}</div>` : html`<div class="empty" style="padding:28px"><p>No cell leaders yet.${manage ? raw(' Use <b>Add member</b> to add up to 6 cell leaders.') : ''}</p></div>`}
         </div>
@@ -419,7 +466,7 @@ export async function renderLifegroup({ main }, id) {
         <div class="card__header"><h2>Members</h2><span class="hint">${g.members.filter((m) => m.tier !== 'solid').length} open cell · ${closedCount(g)} / ${g.solid_target} closed cell</span></div>
         <div class="card__body card__body--flush" id="membersCard">
           ${g.members.length ? html`${memberSections(g.members.map((m) => ({ ...m, name: fullName(m), sub: html`${raw(statusBadge(m.status))} <span class="muted">since ${fmtDate(m.joined_at, { short: true })}</span>` })), { manage,
-              actions: (m) => html`<button class="btn btn--ghost btn--sm" data-leave="${m.id}" data-name="${fullName(m)}" title="Remove from this Lifegroup">Remove</button> ` })}
+              actions: (m) => memberActions(m, g) })}
             <div class="card__footer small muted">${dotsKey()}</div>` : html`<div class="empty" style="padding:28px"><p>No members yet.${manage ? raw(' Use <b>Add member</b> or assign from a person’s profile.') : ''}</p></div>`}
         </div>
       </div>`}
@@ -483,34 +530,8 @@ export async function renderLifegroup({ main }, id) {
     if (!ok) return;
     try { await api.deleteLifegroup(g.id); toast('Lifegroup deleted.', 'info'); location.hash = '#/lifegroups'; } catch (e) { toast(e.message, 'error'); }
   });
-  main.querySelectorAll('[data-leave]').forEach((b) => {
-    b.onclick = async () => {
-      const ok = await confirmDialog({ title: `Remove ${b.dataset.name} from ${g.name}?`, message: 'They will be marked as left today. The membership stays in their history.', confirmText: 'Remove', danger: true });
-      if (!ok) return;
-      try { await api.leaveLifegroup(g.id, Number(b.dataset.leave)); toast('Member removed.', 'info'); renderLifegroup({ main }, id); } catch (e) { toast(e.message, 'error'); }
-    };
-  });
-  main.querySelector('#addMember')?.addEventListener('click', () => {
-    const modal = openModal({
-      title: `Add member to ${g.name}`,
-      body: `<div class="field gsearch-field"><label>Person</label><div class="gsearch" style="max-width:none">${icon('search', 16).value}<input id="memberPick" aria-label="Search a person to add" placeholder="${g.gender ? `Search a ${g.gender === 'boys' ? 'boy' : 'girl'}…` : 'Search a registered person…'}" autocomplete="off" /><div class="gsearch__results" id="memberPickResults" hidden></div></div><input type="hidden" id="memberId" />
-        </div>
-        <div class="form-grid mt-1"><div class="field"><label>Joined on</label><input type="date" id="joinedAt" value="${toISODate(new Date())}" /></div>
-        <div class="field"><label>Role</label><select id="memberRole"><option value="member">Member</option><option value="assistant">Assistant</option><option value="leader">Leader</option></select></div></div>
-        `,
-      footer: `<button class="btn" data-close>Cancel</button><button class="btn btn--primary" id="saveMember">Add to group</button>`,
-    });
-    modal.querySelector('[data-close]').onclick = closeModal;
-    personPicker(modal, { inputId: 'memberPick', hiddenId: 'memberId', sex: SEX_OF[g.gender] || null });
-    modal.querySelector('#saveMember').onclick = (e) => withLoading(e.currentTarget, async () => {
-      const pid = Number(modal.querySelector('#memberId').value);
-      if (!pid) return toast('Choose a registered person first.', 'error');
-      try {
-        const r = await api.assignLifegroup(g.id, pid, { joined_at: modal.querySelector('#joinedAt').value, role: modal.querySelector('#memberRole').value });
-        closeModal(); toast(r.unchanged ? 'Already a member of this group.' : 'Member added.'); renderLifegroup({ main }, id);
-      } catch (ex) { toast(ex.message, 'error'); }
-    });
-  });
+  bindMemberActions(main, new Map([[g.id, g]]), () => renderLifegroup({ main }, id));
+  main.querySelector('#addMember')?.addEventListener('click', () => addMemberDialog(g, () => renderLifegroup({ main }, id)));
 }
 
 // ---------------------------------------------------------------------------
@@ -601,6 +622,7 @@ export async function renderNetwork({ main }, id, openGroups = new Set(), { auto
       <div class="netqr__img" id="netQrImg">${leaderGroup ? raw('<div class="loading small">…</div>') : ''}</div>
       <div class="netqr__text">
         <b>Network QR · ${n.name}</b>
+        <div id="netQrWarn"></div>
         ${leaderGroup ? html`<div class="small muted">Weekly report of <a href="#/lifegroups/${leaderGroup.id}">${leaderGroup.name}</a> · no login needed.</div>
           <div class="row mt-1" style="gap:8px;flex-wrap:wrap"><button class="btn btn--sm" id="netQrOpen">${icon('link', 14)} Link, print &amp; New QR</button><button class="btn btn--sm" id="netQrCopy">${icon('copy', 14)} Copy link</button></div>`
         : html`<div class="small muted">${autoErr ? html`<span class="alert alert--error" style="display:inline-block;padding:6px 10px">${autoErr}</span>` : n.leader_person_id ? `Could not prepare ${n.leader_name}’s Lifegroup for the QR. Reload the page or create their Lifegroup (leader = ${n.leader_name}).` : 'Set the network leader first (Edit) — the Network QR is created automatically after that.'}</div>`}
@@ -625,7 +647,8 @@ export async function renderNetwork({ main }, id, openGroups = new Set(), { auto
               <span class="tree__tag">Network leader</span>
               <div class="tree__who">${n.leader_person_id ? html`<a href="#/people/${n.leader_person_id}"><b>${n.leader_name}</b></a>` : n.leader_name ? html`<b>${n.leader_name}</b> <span class="small muted">(not registered)</span>` : raw('<span class="muted">No leader set yet</span>')}${n.leader_contact ? html`<span class="small muted"> · ${n.leader_contact}</span>` : ''}</div>
               <div class="small muted">Independent network · ${n.cell_leaders || 0} cell leader${n.cell_leaders === 1 ? '' : 's'} report here${leaderGroup ? html` · <a href="#/lifegroups/${leaderGroup.id}" style="color:inherit;text-decoration:underline">${leaderGroup.name}</a>` : ''}</div>
-              ${own && own.members.length ? html`<div class="small mt-1">Cell leaders: ${own.members.map((m, i) => html`${i ? ', ' : ''}<a href="#/people/${m.id}">${fullName(m)}</a>`)}</div>` : ''}
+              ${own ? html`<div class="small mt-1 row" style="gap:6px;flex-wrap:wrap;align-items:center">Cell leaders:${own.members.length ? own.members.map((m) => html`<span class="chip-sm"><a href="#/people/${m.id}">${fullName(m)}</a>${manage ? html`<button type="button" class="chip-sm__x" data-leave="${m.id}" data-gid="${own.id}" data-name="${fullName(m)}" data-gname="${own.name}" title="Remove ${fullName(m)} as cell leader" aria-label="Remove ${fullName(m)}">×</button>` : ''}</span>`) : raw('<span class="muted">none yet</span>')}${manage ? html`<button type="button" class="btn btn--ghost btn--sm" id="addCellLeader">${icon('plus', 14)} Add cell leader</button>` : ''}</div>` : ''}
+              ${manage ? html`<div class="row mt-1" style="gap:6px;flex-wrap:wrap"><button type="button" class="btn btn--sm" id="editNet2">${icon('edit', 14)} Edit network / change leader</button></div>` : ''}
             </div>
             ${n.notes ? html`<div class="small muted mt-1">${n.notes}</div>` : ''}
           </div>
@@ -643,8 +666,9 @@ export async function renderNetwork({ main }, id, openGroups = new Set(), { auto
               <span class="tree__toggle small">${icon('chevR', 14)} <span class="t-open">Show members</span><span class="t-close">Hide members</span></span>
             </summary>
             <div class="tree__members">
-              <div class="row small mb-1" style="gap:10px"><a href="#/lifegroups/${g.id}">Open ${g.name} ${icon('chevR', 12)}</a>${g.leader_person_id ? html`<a href="#/people/${g.leader_person_id}">Leader profile</a>` : ''}</div>
-              ${g.members.length ? memberSections(g.members.map((m) => ({ ...m, name: fullName(m), last4: last4Of(g.id, m.id), sub: html`${raw(statusBadge(m.status))} <span class="muted">since ${fmtDate(m.joined_at, { short: true })}</span>` })), { manage }) : raw('<div class="small muted" style="padding:6px 0">No members yet.</div>')}
+              <div class="row row--between small mb-1" style="gap:10px;flex-wrap:wrap"><span class="row" style="gap:10px"><a href="#/lifegroups/${g.id}">Open ${g.name} ${icon('chevR', 12)}</a>${g.leader_person_id ? html`<a href="#/people/${g.leader_person_id}">Leader profile</a>` : ''}</span>
+                ${manage ? html`<span class="row" style="gap:6px"><button type="button" class="btn btn--sm" data-edit-group="${g.id}">${icon('edit', 14)} Edit group / leader</button><button type="button" class="btn btn--sm" data-add-member="${g.id}">${icon('plus', 14)} Add member</button></span>` : ''}</div>
+              ${g.members.length ? memberSections(g.members.map((m) => ({ ...m, name: fullName(m), last4: last4Of(g.id, m.id), sub: html`${raw(statusBadge(m.status))} <span class="muted">since ${fmtDate(m.joined_at, { short: true })}</span>` })), { manage, actions: (m) => memberActions(m, g) }) : raw('<div class="small muted" style="padding:6px 0">No members yet.</div>')}
             </div>
           </details>`)}</div>` : html`<div class="tree__children"><div class="tree__node small muted">No Lifegroups in this Network yet.${manage ? ' Edit a Lifegroup and choose this Network.' : ''}</div></div>`}
         </div>
@@ -670,16 +694,28 @@ export async function renderNetwork({ main }, id, openGroups = new Set(), { auto
   if (manage && leaderGroup) {
     let prog = null;
     const load = async () => { prog = await api.lifegroupProgress(leaderGroup.id, 4); return prog; };
-    load().then((p) => { const img = main.querySelector('#netQrImg'); if (img) img.innerHTML = p.report_qr || ''; }).catch((e) => { const img = main.querySelector('#netQrImg'); if (img) img.innerHTML = html`<span class="small muted">${e.message}</span>`; });
+    load().then((p) => { const img = main.querySelector('#netQrImg'); if (img) img.innerHTML = p.report_qr || ''; const w = main.querySelector('#netQrWarn'); if (w) w.innerHTML = previewLinkWarning(p.report_link).value + (p.report_link ? `<div class="small muted" style="word-break:break-all">${p.report_link}</div>` : ''); }).catch((e) => { const img = main.querySelector('#netQrImg'); if (img) img.innerHTML = html`<span class="small muted">${e.message}</span>`; });
     const openLink = async () => { try { const p = prog || await load(); linkDialog(leaderGroup.id, p, (link, qr) => { p.report_link = link; p.report_qr = qr; const img = main.querySelector('#netQrImg'); if (img) img.innerHTML = qr || ''; }, { network: n.name }); } catch (e) { toast(e.message, 'error'); } };
     main.querySelector('#netQr').onclick = openLink;
     main.querySelector('#netQrOpen').onclick = openLink;
     main.querySelector('#netQrCopy').onclick = async () => {
-      try { const p = prog || await load(); await navigator.clipboard.writeText(p.report_link); toast('Network link copied.'); } catch (e) { toast(e.message || 'Could not copy — open the QR dialog and copy from there.', 'error'); }
+      try { const p = prog || await load(); await copyText(p.report_link, { label: 'Network link' }); } catch (e) { toast(e.message, 'error'); }
     };
     main.querySelector('#netReport').onclick = async () => { try { const p = prog || await load(); meetingForm(leaderGroup.id, p, null, () => renderNetwork({ main }, id)); } catch (e) { toast(e.message, 'error'); } };
   }
   main.querySelector('#editNet')?.addEventListener('click', () => networkForm(n, () => renderNetwork({ main }, id)));
+  main.querySelector('#editNet2')?.addEventListener('click', () => networkForm(n, () => renderNetwork({ main }, id)));
+  // in-place editing: cell leaders, groups, members (keeps the opened groups open after a change)
+  const refresh = () => renderNetwork({ main }, id, new Set([...main.querySelectorAll('details[data-gid][open]')].map((d) => Number(d.dataset.gid))));
+  const groupsById = new Map(n.groups.map((g) => [g.id, g]));
+  main.querySelector('#addCellLeader')?.addEventListener('click', () => addMemberDialog(own, refresh, { title: `Add a cell leader to ${n.name}`, buttonText: 'Add as cell leader' }));
+  main.querySelectorAll('[data-add-member]').forEach((b) => { b.onclick = () => { const g = groupsById.get(Number(b.dataset.addMember)); if (g) addMemberDialog(g, refresh); }; });
+  main.querySelectorAll('[data-edit-group]').forEach((b) => {
+    b.onclick = () => withLoading(b, async () => {
+      try { const full = await api.lifegroup(Number(b.dataset.editGroup)); groupForm(full, refresh); } catch (e) { toast(e.message, 'error'); }
+    });
+  });
+  bindMemberActions(main, groupsById, refresh);
   main.querySelector('#delNet')?.addEventListener('click', async () => {
     const ok = await confirmDialog({ title: `Delete ${n.name}?`, message: 'This Network has no Lifegroups, so it can be removed.', confirmText: 'Delete', danger: true });
     if (!ok) return;

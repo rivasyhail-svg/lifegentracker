@@ -9,6 +9,7 @@ const { getDb } = require('../db');
 const { clean, wrap, intId, HttpError } = require('../lib/util');
 const { requirePermission } = require('../middleware/auth');
 const reg = require('../services/registrations');
+const { publicBase, publicBaseSource } = require('../lib/public-url');
 const activity = require('../services/activity');
 
 const router = express.Router();   // mounted at /api/registrations
@@ -20,10 +21,7 @@ qr.use(requirePermission('registrations:manage'));
 function registrationUrl(req) {
   const db = getDb();
   const s = reg.settings(db);
-  const custom = clean(s.qr_public_url);
-  let url;
-  if (custom) url = custom.replace(/\/+$/, '').replace(/\/register$/, '') + '/register';
-  else { const proto = req.headers['x-forwarded-proto'] || req.protocol; url = `${proto}://${req.get('host')}/register`; }
+  let url = `${publicBase(db, req)}/register`;
   if (s.qr_mode === 'rotating') url += `?k=${reg.guard.rotation(db, s).token}`;
   return url;
 }
@@ -96,7 +94,7 @@ qr.get('/registration', wrap(async (req, res) => {
   const s = reg.settings(db);
   res.setHeader('Cache-Control', 'no-store');
   const rot = s.qr_mode === 'rotating' ? reg.guard.rotation(db, s) : null;
-  res.json({ url, svg, enabled: reg.on(s.qr_registration_enabled), custom_url: Boolean(clean(s.qr_public_url)), mode: rot ? 'rotating' : 'reusable', valid_through: rot ? rot.valid_through : null, token: rot ? rot.token : null });
+  res.json({ url, svg, enabled: reg.on(s.qr_registration_enabled), custom_url: Boolean(clean(s.qr_public_url)), url_source: publicBaseSource(db), mode: rot ? 'rotating' : 'reusable', valid_through: rot ? rot.valid_through : null, token: rot ? rot.token : null });
 }));
 
 qr.get('/registration.png', wrap(async (req, res) => {

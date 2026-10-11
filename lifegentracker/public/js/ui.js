@@ -331,3 +331,28 @@ document.addEventListener('click', (e) => {
   if (el.dataset.action === 'reload') location.reload();
   if (el.dataset.action === 'print') window.print();
 });
+
+/** Copy text to the clipboard. Works even where the Clipboard API is blocked (embedded previews, old browsers):
+ *  1) navigator.clipboard  2) hidden textarea + execCommand('copy')  3) a dialog with the text pre-selected. Returns true when copied. */
+export async function copyText(text, { label = 'Link' } = {}) {
+  try { if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(text); toast(`${label} copied.`); return true; } } catch { /* blocked → fall through */ }
+  try {
+    const ta = document.createElement('textarea'); ta.value = text; ta.setAttribute('readonly', ''); ta.style.cssText = 'position:fixed;top:-1000px;opacity:0'; document.body.appendChild(ta); ta.select(); ta.setSelectionRange(0, text.length);
+    const ok = document.execCommand && document.execCommand('copy'); ta.remove();
+    if (ok) { toast(`${label} copied.`); return true; }
+  } catch { /* fall through */ }
+  const modal = openModal({ title: `Copy ${label.toLowerCase()}`, subtitle: 'Copying is blocked by this browser window. The text below is already selected — press Ctrl+C (Cmd+C on Mac), or long-press on a phone.',
+    body: `<input class="input" id="copyBox" value="${esc(text)}" readonly style="width:100%;font-family:ui-monospace,monospace;font-size:.9rem" />`, footer: '<button class="btn btn--primary" data-close>Done</button>' });
+  modal.querySelector('[data-close]').onclick = closeModal;
+  const box = modal.querySelector('#copyBox'); box.focus(); box.select(); box.onclick = () => box.select();
+  return false;
+}
+
+/** Warning shown next to any QR / link when the app is opened through a temporary preview or a local address:
+ *  such links do not open on other devices. Empty string on a real public domain or when a Public URL is set. */
+export function previewLinkWarning(link = '') {
+  const host = (() => { try { return new URL(link || location.href, location.href).hostname; } catch { return location.hostname; } })();
+  const temp = /(^|\.)e2b\.app$/.test(host) || host === 'localhost' || host === '127.0.0.1' || /^10\.|^192\.168\./.test(host);
+  if (!temp) return raw('');
+  return raw(`<div class="alert alert--warn small alert--block" style="margin:8px 0"><b>Temporary preview link.</b> <code>${esc(host)}</code> only opens inside this preview window — it will NOT open on a phone, in another tab or from a printed QR (you will see "Missing traffic access token"). Use the live site, or set <b>Settings → QR Registration → Public URL</b> to your real address (e.g. https://lifegentracker.vercel.app) so every QR and link uses it.</div>`);
+}

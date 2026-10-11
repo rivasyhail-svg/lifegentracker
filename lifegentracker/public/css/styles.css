@@ -788,7 +788,7 @@ button.gsearch__item small { color: var(--muted); font-size: .76rem; }
 .tree__node { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px 14px; background: var(--surface); display: block; color: inherit; }
 a.tree__node:hover { border-color: var(--accent); text-decoration: none; }
 .tree__node--root { background: var(--accent); color: #fff; border-color: var(--accent); }
-.tree__node--root a, .tree__node--root .muted { color: #fff !important; } .tree__node--root .muted { opacity: .85; }
+.tree__node--root a, .tree__node--root .muted { color: #fff !important; } .tree__node--root .muted { opacity: .85; } .tree__node--root .chip-sm a { color: var(--text) !important; } .tree__node--root .chip-sm__x { color: var(--muted); }
 .tree__tag { display: block; font-size: .7rem; text-transform: uppercase; letter-spacing: .06em; font-weight: 700; opacity: .8; margin-bottom: 2px; }
 .tree__who { font-size: 1rem; }
 .tree__children { margin-left: 22px; padding-left: 16px; border-left: 2px solid var(--border); display: flex; flex-direction: column; gap: 10px; position: relative; }
@@ -928,6 +928,9 @@ details[open] > summary .t-open { display: none; } details:not([open]) > summary
 .chip-group { margin-top: 10px; }
 .chip-group__title { font-size: .78rem; font-weight: 600; color: var(--muted); margin: 10px 0 6px; }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip-sm { display: inline-flex; align-items: center; gap: 2px; border: 1px solid var(--border); border-radius: 999px; background: #fff; padding: 1px 4px 1px 9px; font-size: .8rem; } .chip-sm a { color: var(--text); text-decoration: none; } .chip-sm a:hover { text-decoration: underline; }
+.chip-sm__x { border: none; background: none; color: var(--muted); font-size: 1rem; line-height: 1; padding: 0 5px; cursor: pointer; border-radius: 999px; }
+.chip-sm__x:hover { background: var(--red-50); color: var(--red-600); }
 .chip { display: inline-flex; align-items: stretch; border: 1px solid var(--border); border-radius: 999px; background: #fff; overflow: hidden; max-width: 100%; }
 .chip__main { display: inline-flex; align-items: center; gap: 8px; padding: 9px 12px 9px 10px; background: transparent; border: 0; font: inherit; color: var(--text); cursor: pointer; min-height: 42px; text-align: left; }
 .chip__check { width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid #c3c7cd; flex: none; position: relative; }
@@ -1063,3 +1066,4 @@ details[open] > summary .t-open { display: none; } details:not([open]) > summary
 .netblock .table td:first-child { white-space: normal; }
 .netblock .table th:last-child, .netblock .table td:last-child { padding-right: 16px; }
 .stack-sm { display: flex; flex-direction: column; gap: 6px; }
+.alert--block { display: block; } .alert--block code { font-size: .8em; }
