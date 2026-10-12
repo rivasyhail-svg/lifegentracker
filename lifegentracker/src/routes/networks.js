@@ -118,6 +118,17 @@ function withTotals(rows) {
 }
 
 // GET /api/networks/:id/calendar — week-by-week: did the leader's own group and each group under it meet?
+// GET /api/networks/:id/monitor?date= — the network leader's weekly monitoring (read-only for staff; same numbers the leader sees)
+router.get('/:id/monitor', requirePermission('lifegroups:view'), wrap((req, res) => {
+  const db = getDb();
+  const n = getNetwork(db, intId(req.params.id), req.user);
+  if (!n) throw new HttpError(404, 'Network not found.');
+  if (!n.leader_person_id) return res.json(null);
+  const lg = db.prepare('SELECT id FROM lifegroups WHERE leader_person_id = ? AND is_active = 1 ORDER BY id LIMIT 1').get(n.leader_person_id);
+  if (!lg) return res.json(null);
+  res.json(prog.weeklyMonitor(db, n.leader_person_id, lg.id, req.query.date));
+}));
+
 router.get('/:id/calendar', requirePermission('lifegroups:view'), wrap((req, res) => {
   res.json(prog.networkCalendar(getDb(), intId(req.params.id), { weeks: Math.min(Math.max(Number(req.query.weeks) || 8, 4), 26), withMembers: req.query.members === '1' }));
 }));

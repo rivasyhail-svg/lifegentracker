@@ -533,14 +533,14 @@ function overview(db, { weeks = 8 } = {}) {
 // One "session" = one meeting of the group in a calendar week (Mon–Sun). Marks are upserted per
 // (meeting, person) so a leader can never be recorded twice; a later tap simply corrects the earlier one.
 // ---------------------------------------------------------------------------
-const MARK_STATUS = ['present', 'absent'];
+const MARK_STATUS = ['present', 'absent', 'clear']; // clear = back to "not yet recorded"
 function markAttendance(db, groupId, personId, status, meta = {}) {
   const s = settings(db);
   const g = db.prepare('SELECT id, name, is_active FROM lifegroups WHERE id = ?').get(groupId);
   if (!g) throw new HttpError(404, 'Lifegroup not found.');
   if (!g.is_active) throw new HttpError(400, 'This Lifegroup is inactive.');
   status = String(status || '').toLowerCase();
-  if (!MARK_STATUS.includes(status)) throw new HttpError(400, 'Choose Present or Absent.', { status: 'present or absent' });
+  if (!MARK_STATUS.includes(status)) throw new HttpError(400, 'Choose Present, Absent or Not yet recorded.', { status: 'present, absent or clear' });
   const today = churchToday(db, s);
   const date = clean(meta.date) || today;
   if (!isValidDate(date)) throw new HttpError(400, 'Please choose a valid date.', { date: 'Invalid date.' });
@@ -556,23 +556,32 @@ function markAttendance(db, groupId, personId, status, meta = {}) {
     let m = db.prepare('SELECT id, meeting_date, held FROM lifegroup_meetings WHERE lifegroup_id = ? AND meeting_date = ?').get(groupId, date)
       || db.prepare('SELECT id, meeting_date, held FROM lifegroup_meetings WHERE lifegroup_id = ? AND meeting_date BETWEEN ? AND ? ORDER BY meeting_date DESC LIMIT 1').get(groupId, week, weekEnd);
     let created = false;
+    if (meta.requireHeld) { // member attendance of a cell group: the Lifegroup must have been reported as conducted first (never auto-created)
+      if (!m) throw new HttpError(400, 'Mark "Yes, conducted Lifegroup" for this week first, then record who was present.', { report: 'missing' });
+      if (!Number(m.held)) throw new HttpError(400, 'This Lifegroup was reported as not conducted this week. Change the report first.', { report: 'not_conducted' });
+    }
     if (!m) {
+      if (status === 'clear') return { meeting_id: null, meeting_date: null, person_id: pid, status: null, changed: false, created_meeting: false };
       const id = db.prepare(`INSERT INTO lifegroup_meetings (lifegroup_id, meeting_date, held, present_count, submitted_via, submitted_by_user, submitted_by_name)
         VALUES (?, ?, 1, 0, ?, ?, ?)`).run(groupId, date, by, meta.user ? meta.user.id : null, marker).lastInsertRowid;
       m = { id, meeting_date: date, held: 1 }; created = true;
     } else if (!Number(m.held) && status === 'present') { // someone was present → the Lifegroup did happen this week
       db.prepare("UPDATE lifegroup_meetings SET held = 1, no_meeting_reason = NULL, updated_at = datetime('now') WHERE id = ?").run(m.id);
     }
-    const row = db.prepare('SELECT id, present, absent FROM lifegroup_meeting_attendance WHERE meeting_id = ? AND person_id = ?').get(m.id, pid);
+    const row = db.prepare('SELECT id, present, absent, devotion FROM lifegroup_meeting_attendance WHERE meeting_id = ? AND person_id = ?').get(m.id, pid);
     const present = status === 'present' ? 1 : 0, absent = status === 'absent' ? 1 : 0;
     const before = row ? (Number(row.present) ? 'present' : Number(row.absent) ? 'absent' : null) : null;
-    if (row) db.prepare("UPDATE lifegroup_meeting_attendance SET present = ?, absent = ?, marked_by = ?, marked_at = datetime('now') WHERE id = ?").run(present, absent, marker, row.id);
+    if (status === 'clear') {
+      if (row && Number(row.devotion)) db.prepare("UPDATE lifegroup_meeting_attendance SET present = 0, absent = 0, marked_by = ?, marked_at = datetime('now') WHERE id = ?").run(marker, row.id);
+      else if (row) db.prepare('DELETE FROM lifegroup_meeting_attendance WHERE id = ?').run(row.id);
+    } else if (row) db.prepare("UPDATE lifegroup_meeting_attendance SET present = ?, absent = ?, marked_by = ?, marked_at = datetime('now') WHERE id = ?").run(present, absent, marker, row.id);
     else db.prepare("INSERT INTO lifegroup_meeting_attendance (meeting_id, person_id, present, devotion, absent, marked_by, marked_at) VALUES (?, ?, ?, 0, ?, ?, datetime('now'))").run(m.id, pid, present, absent, marker);
     db.prepare("UPDATE lifegroup_meetings SET present_count = (SELECT COUNT(*) FROM lifegroup_meeting_attendance WHERE meeting_id = ? AND present = 1), updated_at = datetime('now') WHERE id = ?").run(m.id, m.id);
     const who = `${member.first_name} ${member.last_name}`;
+    const after = status === 'clear' ? null : status;
     activity.log(db, meta.user || null, 'lifegroup.attendance', 'lifegroup', groupId,
-      `${who} marked ${status.toUpperCase()}${before && before !== status ? ` (was ${before})` : ''} for ${g.name} · ${m.meeting_date}${by === 'leader_link' ? ` by ${marker || 'leader'} via the leader link` : ''}`);
-    return { meeting_id: m.id, meeting_date: m.meeting_date, person_id: pid, status, changed: before !== status, created_meeting: created };
+      `${who} ${after ? 'marked ' + after.toUpperCase() : 'attendance cleared (not yet recorded)'}${before && before !== after ? ` (was ${before})` : ''} for ${g.name} · ${m.meeting_date}${by === 'leader_link' ? ` by ${marker || 'leader'} via the leader link` : ''}`);
+    return { meeting_id: m.id, meeting_date: m.meeting_date, person_id: pid, status: after, changed: before !== after, created_meeting: created };
   })();
 }
 
@@ -590,4 +599,128 @@ function weekMarks(db, groupId, s = settings(db)) {
   return out;
 }
 
-module.exports = { settings, target, recentWeeks, mondayOf, addDays, churchToday, ensureToken, resetToken, groupByToken, members, memberWeeks, meetingsOf, calendar, progress, setTier, leaveMember, restoreMember, formerMembers, recordMeeting, maxMembers, assertRoom, assertNotNetworkLeader, NETWORK_LEADER_MAX, networkMax, deleteMeeting, networkCalendar, leaderNetworkView, networkStatus, structureTiles, overview, summarize, markAttendance, weekMarks };
+
+// ---------------------------------------------------------------------------
+// Network-leader weekly monitoring: (1) cell leader attendance at the network meeting, (2) "did the cell leader
+// conduct Lifegroup this week?" (the cell group's own meeting row: held 1 / 0 / no row = not yet reported),
+// (3) member attendance of that reported session. The three never imply each other.
+// ---------------------------------------------------------------------------
+const DAY_IDX = { mon: 0, tue: 1, wed: 2, thu: 3, fri: 4, sat: 5, sun: 6 };
+function meetingInWeek(db, groupId, date) {
+  const week = mondayOf(date), weekEnd = addDays(week, 6);
+  return db.prepare('SELECT id, meeting_date, held, no_meeting_reason, present_count, submitted_via, submitted_by_name FROM lifegroup_meetings WHERE lifegroup_id = ? AND meeting_date = ?').get(groupId, date)
+    || db.prepare('SELECT id, meeting_date, held, no_meeting_reason, present_count, submitted_via, submitted_by_name FROM lifegroup_meetings WHERE lifegroup_id = ? AND meeting_date BETWEEN ? AND ? ORDER BY meeting_date DESC LIMIT 1').get(groupId, week, weekEnd);
+}
+function marksOf(db, meetingId) {
+  const out = {};
+  if (!meetingId) return out;
+  for (const r of db.prepare('SELECT person_id, present, absent FROM lifegroup_meeting_attendance WHERE meeting_id = ?').all(meetingId)) {
+    if (Number(r.present)) out[r.person_id] = 'present'; else if (Number(r.absent)) out[r.person_id] = 'absent';
+  }
+  return out;
+}
+function anchorDate(db, s, dateStr) {
+  const today = churchToday(db, s);
+  let date = clean(dateStr) || today;
+  if (!isValidDate(date)) throw new HttpError(400, 'Please choose a valid date.', { date: 'Invalid date.' });
+  if (date > today) throw new HttpError(400, 'That week has not happened yet.', { date: 'Future date.' });
+  if (date < addDays(today, -365)) throw new HttpError(400, 'Only the last 12 months can be reviewed here.', { date: 'Too far back.' });
+  return { date, today };
+}
+const NOT_CONDUCTED_DEFAULT = 'Not conducted this week (reported by the network leader)';
+/** conducted: 'yes' | 'no' | 'clear' (back to "not yet reported"). Member attendance is never deleted silently. */
+function setConducted(db, groupId, body, meta = {}) {
+  const s = settings(db);
+  const g = db.prepare('SELECT id, name, is_active, schedule_day FROM lifegroups WHERE id = ?').get(groupId);
+  if (!g) throw new HttpError(404, 'Lifegroup not found.');
+  if (!g.is_active) throw new HttpError(400, 'This Lifegroup is inactive.');
+  const conducted = String(body?.conducted || '').toLowerCase();
+  if (!['yes', 'no', 'clear'].includes(conducted)) throw new HttpError(400, 'Choose Yes, No or Not yet reported.', { conducted: 'yes, no or clear' });
+  const { date, today } = anchorDate(db, s, body?.date);
+  if (date < addDays(today, -120)) throw new HttpError(400, 'Reports can only be changed for the last 120 days.', { date: 'Too far back.' });
+  const reason = clean(body?.reason);
+  if ((reason || '').length > 160) throw new HttpError(400, 'Reason is too long.');
+  const by = meta.via === 'leader_link' ? 'leader_link' : 'admin';
+  const marker = meta.byName || (meta.user && (meta.user.display_name || meta.user.username)) || null;
+  return db.transaction(() => {
+    const m = meetingInWeek(db, groupId, date);
+    const marks = m ? marksOf(db, m.id) : {};
+    const marked = Object.keys(marks).length;
+    const before = m ? (Number(m.held) ? 'yes' : 'no') : null;
+    let out;
+    if (conducted === 'yes') {
+      if (m) { db.prepare("UPDATE lifegroup_meetings SET held = 1, no_meeting_reason = NULL, updated_at = datetime('now') WHERE id = ?").run(m.id); out = { meeting_id: m.id, meeting_date: m.meeting_date }; }
+      else {
+        // the group's usual day inside that week (if already past), else the chosen date
+        let md = date;
+        if (g.schedule_day && DAY_IDX[g.schedule_day] !== undefined) { const cand = addDays(mondayOf(date), DAY_IDX[g.schedule_day]); if (cand <= today) md = cand; }
+        const id = db.prepare(`INSERT INTO lifegroup_meetings (lifegroup_id, meeting_date, held, present_count, submitted_via, submitted_by_user, submitted_by_name) VALUES (?, ?, 1, 0, ?, ?, ?)`)
+          .run(groupId, md, by, meta.user ? meta.user.id : null, marker).lastInsertRowid;
+        out = { meeting_id: id, meeting_date: md };
+      }
+    } else if (conducted === 'no') {
+      const presentN = Object.values(marks).filter((v) => v === 'present').length;
+      if (presentN) throw new HttpError(409, `${presentN} member${presentN === 1 ? ' is' : 's are'} marked present for this session. Clear the member attendance first, then mark it as not conducted.`, { report: 'has_attendance' });
+      if (m) { db.prepare("UPDATE lifegroup_meetings SET held = 0, no_meeting_reason = ?, present_count = 0, updated_at = datetime('now') WHERE id = ?").run(reason || m.no_meeting_reason || NOT_CONDUCTED_DEFAULT, m.id); db.prepare('DELETE FROM lifegroup_meeting_attendance WHERE meeting_id = ? AND absent = 1 AND devotion = 0').run(m.id); out = { meeting_id: m.id, meeting_date: m.meeting_date }; }
+      else {
+        const id = db.prepare(`INSERT INTO lifegroup_meetings (lifegroup_id, meeting_date, held, no_meeting_reason, present_count, submitted_via, submitted_by_user, submitted_by_name) VALUES (?, ?, 0, ?, 0, ?, ?, ?)`)
+          .run(groupId, date, reason || NOT_CONDUCTED_DEFAULT, by, meta.user ? meta.user.id : null, marker).lastInsertRowid;
+        out = { meeting_id: id, meeting_date: date };
+      }
+    } else { // clear → "not yet reported"
+      if (!m) return { meeting_id: null, meeting_date: null, conducted: null, changed: false };
+      if (marked) throw new HttpError(409, `${marked} member${marked === 1 ? ' has' : 's have'} attendance recorded for this session. Clear the member attendance first.`, { report: 'has_attendance' });
+      db.prepare('DELETE FROM lifegroup_meetings WHERE id = ?').run(m.id);
+      out = { meeting_id: null, meeting_date: null };
+    }
+    const after = conducted === 'clear' ? null : conducted;
+    activity.log(db, meta.user || null, 'lifegroup.report', 'lifegroup', groupId,
+      `${g.name}: ${after === 'yes' ? 'conducted Lifegroup' : after === 'no' ? `did NOT conduct Lifegroup${reason ? ` (${reason})` : ''}` : 'weekly report cleared (not yet reported)'} · week of ${mondayOf(date)}${before && before !== after ? ` (was ${before === 'yes' ? 'conducted' : 'not conducted'})` : ''}${by === 'leader_link' ? ` by ${marker || 'network leader'} via the leader link` : ''}`);
+    return { ...out, conducted: after, changed: before !== after };
+  })();
+}
+
+/** Everything the network leader's weekly monitoring view needs for the week containing `dateStr`. */
+function weeklyMonitor(db, leaderPersonId, leaderGroupId, dateStr) {
+  const s = settings(db);
+  const { date, today } = anchorDate(db, s, dateStr);
+  const week = mondayOf(date), weekEnd = addDays(week, 6);
+  const lm = meetingInWeek(db, leaderGroupId, date);
+  const leaderMarks = lm ? marksOf(db, lm.id) : {};
+  const cellLeaders = members(db, leaderGroupId);
+  const nets = db.prepare('SELECT id FROM networks WHERE leader_person_id = ? AND is_active = 1').all(leaderPersonId).map((n) => n.id);
+  const groups = nets.length ? db.prepare(`SELECT g.id, g.name, g.gender, g.leader_person_id, g.schedule_day, g.schedule_time, COALESCE(lp.first_name || ' ' || lp.last_name, g.leader_name) AS leader_name
+      FROM lifegroups g LEFT JOIN people lp ON lp.id = g.leader_person_id
+     WHERE g.is_active = 1 AND g.network_id IN (${nets.map(() => '?').join(',')}) AND (g.leader_person_id IS NULL OR g.leader_person_id <> ?) ORDER BY g.name COLLATE NOCASE`).all(...nets, leaderPersonId) : [];
+  const byLeader = new Map(groups.filter((g) => g.leader_person_id).map((g) => [g.leader_person_id, g]));
+  const row = (id, name, group, inLeaderGroup) => {
+    const mt = group ? meetingInWeek(db, group.id, date) : null;
+    const mem = group ? members(db, group.id) : [];
+    const marks = mt && Number(mt.held) ? marksOf(db, mt.id) : {};
+    const memberRows = mem.map((m) => ({ id: m.id, name: `${m.first_name} ${m.last_name}`, tier: m.tier, role: m.role, status: marks[m.id] || null }));
+    const present = memberRows.filter((m) => m.status === 'present').length, absent = memberRows.filter((m) => m.status === 'absent').length;
+    return {
+      id, name, in_leader_group: inLeaderGroup,
+      attendance: inLeaderGroup ? leaderMarks[id] || null : null,
+      group: group ? { id: group.id, name: group.name, gender: group.gender, schedule_day: group.schedule_day, schedule_time: group.schedule_time } : null,
+      report: { status: mt ? (Number(mt.held) ? 'yes' : 'no') : null, meeting_id: mt ? mt.id : null, meeting_date: mt ? mt.meeting_date : null, reason: mt && !Number(mt.held) ? mt.no_meeting_reason : null, submitted_via: mt ? mt.submitted_via : null, submitted_by: mt ? mt.submitted_by_name : null },
+      members: memberRows,
+      totals: { registered: memberRows.length, present, absent, unrecorded: memberRows.length - present - absent },
+    };
+  };
+  const leaders = cellLeaders.map((cl) => row(cl.id, `${cl.first_name} ${cl.last_name}`, byLeader.get(cl.id) || null, true));
+  for (const g of groups) if (!cellLeaders.some((cl) => cl.id === g.leader_person_id)) leaders.push(row(g.leader_person_id || -g.id, g.leader_name || g.name, g, false));
+  const withGroup = leaders.filter((l) => l.group);
+  const reported = withGroup.filter((l) => l.report.status);
+  const conducted = withGroup.filter((l) => l.report.status === 'yes');
+  const sum = (arr, k) => arr.reduce((t, l) => t + l.totals[k], 0);
+  const summary = {
+    leaders: { total: leaders.filter((l) => l.in_leader_group).length, present: leaders.filter((l) => l.attendance === 'present').length, absent: leaders.filter((l) => l.attendance === 'absent').length, unrecorded: leaders.filter((l) => l.in_leader_group && !l.attendance).length },
+    lifegroups: { total: withGroup.length, conducted: conducted.length, not_conducted: withGroup.filter((l) => l.report.status === 'no').length, not_reported: withGroup.length - reported.length },
+    reports: { submitted: reported.length, pending: withGroup.length - reported.length },
+    members: { sessions: conducted.length, registered: sum(conducted, 'registered'), present: sum(conducted, 'present'), absent: sum(conducted, 'absent'), unrecorded: sum(conducted, 'unrecorded') },
+  };
+  return { date, today, week_start: week, week_end: weekEnd, is_current_week: week === mondayOf(today), leader_meeting: lm ? { id: lm.id, meeting_date: lm.meeting_date, held: Boolean(Number(lm.held)) } : null, leaders, summary };
+}
+
+module.exports = { settings, target, recentWeeks, mondayOf, addDays, churchToday, ensureToken, resetToken, groupByToken, members, memberWeeks, meetingsOf, calendar, progress, setTier, leaveMember, restoreMember, formerMembers, recordMeeting, maxMembers, assertRoom, assertNotNetworkLeader, NETWORK_LEADER_MAX, networkMax, deleteMeeting, networkCalendar, leaderNetworkView, networkStatus, structureTiles, overview, summarize, markAttendance, weekMarks, setConducted, weeklyMonitor };

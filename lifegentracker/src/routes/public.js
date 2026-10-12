@@ -115,7 +115,8 @@ router.post('/lifegroup/:token/attendance', rateLimit('lg-mark', 240), wrap((req
   const db = getDb();
   const g = groupOr404(req.params.token);
   const out = prog.markAttendance(db, g.id, req.body?.person_id, req.body?.status, { date: req.body?.date, via: 'leader_link', byName: g.leader_display || 'leader' });
-  res.json({ ok: true, ...out, this_week: prog.weekMarks(db, g.id), recent: prog.meetingsOf(db, g.id, 6).map(pubMeeting) });
+  const isNet = g.leader_person_id && db.prepare('SELECT 1 FROM networks WHERE leader_person_id = ? AND is_active = 1').get(g.leader_person_id);
+  res.json({ ok: true, ...out, this_week: prog.weekMarks(db, g.id), recent: prog.meetingsOf(db, g.id, 6).map(pubMeeting), monitor: isNet ? prog.weeklyMonitor(db, g.leader_person_id, g.id, req.body?.date) : null });
 }));
 
 router.post('/lifegroup/:token/report', rateLimit('lg-report', 60), wrap((req, res) => {
@@ -158,6 +159,48 @@ router.put('/lifegroup/:token/groups/:groupId/members/:personId/tier', rateLimit
   if (!ok) throw new HttpError(403, 'That Lifegroup is not in your network.');
   prog.setTier(db, gid, pid, String(req.body?.tier || ''), { via: 'leader_link', byName: `${g.leader_display || 'network leader'} (network leader)` });
   res.json({ ok: true, network: prog.leaderNetworkView(db, g.leader_person_id, { weeks: 4 }) });
+}));
+
+// ---------------------------------------------------------------------------
+// Network leader weekly monitoring (network leaders only — the token's group must lead an active network).
+// ---------------------------------------------------------------------------
+function networkLeaderOr403(db, g) {
+  const ok = g.leader_person_id && db.prepare('SELECT 1 FROM networks WHERE leader_person_id = ? AND is_active = 1').get(g.leader_person_id);
+  if (!ok) throw new HttpError(403, 'Only a network leader can use this.');
+}
+function subGroupOr403(db, g, gid) {
+  const ok = g.leader_person_id && db.prepare('SELECT 1 FROM lifegroups lg JOIN networks n ON n.id = lg.network_id WHERE lg.id = ? AND n.leader_person_id = ? AND n.is_active = 1 AND (lg.leader_person_id IS NULL OR lg.leader_person_id <> ?)').get(gid, g.leader_person_id, g.leader_person_id);
+  if (!ok) throw new HttpError(403, 'That Lifegroup is not in your network.');
+}
+const byNet = (g) => `${g.leader_display || 'network leader'} (network leader)`;
+
+// GET /api/public/lifegroup/:token/monitor?date=YYYY-MM-DD → the week containing `date` (default: today)
+router.get('/lifegroup/:token/monitor', rateLimit('lg-monitor', 240), wrap((req, res) => {
+  const db = getDb();
+  const g = groupOr404(req.params.token);
+  networkLeaderOr403(db, g);
+  res.setHeader('Cache-Control', 'no-store');
+  res.json(prog.weeklyMonitor(db, g.leader_person_id, g.id, req.query.date));
+}));
+
+// POST …/groups/:gid/conducted { conducted: 'yes'|'no'|'clear', date, reason? } — did the cell leader conduct Lifegroup that week?
+router.post('/lifegroup/:token/groups/:groupId/conducted', rateLimit('lg-conducted', 240), wrap((req, res) => {
+  const db = getDb();
+  const g = groupOr404(req.params.token);
+  const gid = Number(req.params.groupId);
+  subGroupOr403(db, g, gid);
+  const out = prog.setConducted(db, gid, req.body || {}, { via: 'leader_link', byName: byNet(g) });
+  res.json({ ok: true, ...out, monitor: prog.weeklyMonitor(db, g.leader_person_id, g.id, req.body?.date) });
+}));
+
+// POST …/groups/:gid/attendance { person_id, status: 'present'|'absent'|'clear', date } — member attendance of a reported session
+router.post('/lifegroup/:token/groups/:groupId/attendance', rateLimit('lg-member-mark', 600), wrap((req, res) => {
+  const db = getDb();
+  const g = groupOr404(req.params.token);
+  const gid = Number(req.params.groupId);
+  subGroupOr403(db, g, gid);
+  const out = prog.markAttendance(db, gid, req.body?.person_id, req.body?.status, { date: req.body?.date, via: 'leader_link', byName: byNet(g), requireHeld: true });
+  res.json({ ok: true, ...out, monitor: prog.weeklyMonitor(db, g.leader_person_id, g.id, req.body?.date) });
 }));
 
 module.exports = router;

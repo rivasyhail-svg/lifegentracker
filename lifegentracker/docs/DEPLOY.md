@@ -350,3 +350,17 @@ Enforced in three layers:
 
 ### 3t — one public-address rule for every QR / link
 Every QR and leader link is built by `src/lib/public-url.js`: **Settings → Public URL** → env `LIFEGEN_PUBLIC_URL` → Vercel's production domain (`VERCEL_PROJECT_PRODUCTION_URL`, automatic) → the request host. On Vercel this means a QR can never carry a preview/sandbox address, even when generated from a preview deployment or after "New QR". Set Public URL once (`https://lifegentracker.vercel.app`) to make this explicit; the admin UI shows `url_source` and a warning when a link is still a temporary preview address.
+
+## Update 3u — Reject from the inbox row + Network leader weekly monitoring (2026-10-12)
+
+**Files changed:** `public/js/views/registrations.js`, `src/services/lifegroup-progress.js`, `src/routes/public.js`, `src/routes/networks.js`, `public/js/lifegroup.js`, `public/css/register.css`, `tests/api.test.js`, `docs/DEPLOY.md`. **No database migration** — uses the existing `lifegroup_meetings` / `lifegroup_meeting_attendance` tables.
+
+1. **Registrations inbox** — pending rows now have **Reject** next to Approve (same dialog as before: optional reason + block options).
+2. **Network leader page → My cell leaders** (`/lifegroup?t=…`, network leaders only) is now a weekly monitor with three *separate* records per cell leader:
+   - **Network meeting** — Present / Absent / Not yet (attendance of the cell leader at the network leader's meeting).
+   - **Conducted Lifegroup this week?** — Yes / No / Not yet (the cell leader's own report; never implied by attendance). "No" asks for an optional reason.
+   - **Member attendance** — shown only after "Yes": Present / Absent / Not yet per member with date, group name and registered / present / absent / not-yet totals.
+   - Summary cards: cell leaders present, Lifegroups conducted, reports submitted / pending, member attendance totals. Week picker (any date in the week, ‹ › arrows, up to 1 year back) and a cell-leader filter. History: pick a past week and everything reads back.
+3. **Rules enforced on the server:** only a network leader's link can open the monitor (403 otherwise); only groups inside that leader's own network can be edited (403); one meeting row per group per week and one attendance row per member per session (no duplicates); members cannot be marked before "Yes" (400); "No" is refused while members are still marked present (409 — clear them first); future dates are refused; every change is in the Activity log.
+4. **Staff mirror:** `GET /api/networks/:id/monitor?date=` (read-only, `lifegroups:view`).
+5. Tests: 90/90 (`npm test`).

@@ -123,7 +123,7 @@ export async function renderRegistrations({ main, query }) {
             ${filters.status === 'pending' ? '' : html`<td data-label="Lifegroup" class="small nowrap">${r.status === 'approved' && r.lifegroup_name ? html`<a href="#/lifegroups/${r.lifegroup_id}">${r.lifegroup_name}</a>` : r.status === 'approved' && r.person_id ? html`<a class="badge badge--nodot" href="#/people/${r.person_id}" title="No Lifegroup leader matched the name typed on the form — assign from the profile">Needs Lifegroup</a>` : raw('<span class="muted">—</span>')}</td>`}
             <td data-label="" style="white-space:nowrap;text-align:right">
               <button class="btn btn--sm" data-view="${r.id}">View</button>
-              ${r.status === 'pending' ? html` <button class="btn btn--sm btn--primary" data-approve="${r.id}">Approve</button>` : ''}
+              ${r.status === 'pending' ? html` <button class="btn btn--sm btn--danger-ghost" data-reject-row="${r.id}">Reject</button> <button class="btn btn--sm btn--primary" data-approve="${r.id}">Approve</button>` : ''}
             </td>
           </tr>`)}
         </tbody>
@@ -141,6 +141,7 @@ export async function renderRegistrations({ main, query }) {
     syncBulk();
     list.querySelectorAll('[data-view]').forEach((b) => { b.onclick = (e) => { e.stopPropagation(); openRegistration(Number(b.dataset.view), load); }; });
     list.querySelectorAll('[data-approve]').forEach((b) => { b.onclick = (e) => { e.stopPropagation(); openRegistration(Number(b.dataset.approve), load, { approve: true }); }; });
+    list.querySelectorAll('[data-reject-row]').forEach((b) => { b.onclick = (e) => { e.stopPropagation(); const r = data.items.find((x) => x.id === Number(b.dataset.rejectRow)); if (r) rejectDialog(r, async () => { await load(); refreshPendingBadge(); }); }; });
     list.querySelectorAll('tr.clickable').forEach((tr) => { tr.onclick = () => openRegistration(Number(tr.dataset.id), load); });
   }
 

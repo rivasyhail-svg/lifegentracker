@@ -47,45 +47,103 @@ function memberRows(list, { tapTier, groupId, inactive = false } = {}) {
 
 /** Network leader: "My cell leaders" — just the names and whether they were present (their last 4 weeks in my
  *  Lifegroup). Tap a name → that leader's own members appear in Open cell / Closed cell and can be moved there. */
+let mon = null;            // weekly monitoring data for the selected week (network leaders only)
+let monBusy = false;       // loading a week
+let monErr = '';
+let leaderFilter = '';     // '' = all cell leaders
+const addDaysISO = (iso, n) => { const t = new Date(`${iso}T00:00:00Z`); t.setUTCDate(t.getUTCDate() + n); return t.toISOString().slice(0, 10); };
+
+async function loadMonitor(date) {
+  monBusy = true; monErr = ''; render();
+  try { mon = await call('GET', `/api/public/lifegroup/${encodeURIComponent(token)}/monitor${date ? `?date=${encodeURIComponent(date)}` : ''}`); }
+  catch (e) { monErr = e.message; if (e.status === 404) setTimeout(load, 1500); }
+  monBusy = false; render();
+}
+
+/** Three-state control: Present / Absent / Not yet (or Yes / No / Not yet). */
+function tri(kind, value, { labels, person = '', group = '', disabled = false, title = '' }) {
+  const opts = [['present', labels[0], 'tri__on-yes'], ['absent', labels[1], 'tri__on-no'], ['clear', labels[2], 'tri__on-none']];
+  return `<span class="tri ${disabled ? 'is-disabled' : ''}" role="group" aria-label="${esc(title)}">${opts.map(([v, l, cls]) => {
+    const on = v === 'clear' ? !value : value === v;
+    return `<button type="button" class="tri__b ${on ? `is-on ${cls}` : ''}" data-tri="${v}" data-kind="${kind}" data-person="${person}" data-group="${group}" aria-pressed="${on}" ${disabled ? 'disabled' : ''}>${l}</button>`;
+  }).join('')}</span>`;
+}
+
 function cellLeadersView() {
   const net = d.network;
-  const byLeader = new Map(net.groups.map((g) => [g.leader_person_id, g]));
-  const rows = d.members.map((m) => ({ id: m.id, name: m.name, last4: m.last4, group: byLeader.get(m.id) || null }));
-  for (const g of net.groups) if (!rows.some((r) => r.id === g.leader_person_id)) rows.push({ id: g.leader_person_id || `g${g.id}`, name: g.leader_name || g.name, last4: null, group: g });
+  const byGroupId = new Map(net.groups.map((g) => [g.id, g]));
   const cell = (g, tier, list) => `<section class="cell cell--${tier === 'solid' ? 'closed' : 'open'}">
       <header class="cell__head"><b>${TIER[tier]}</b> <span class="muted">· ${list.length}${tier === 'solid' ? ` / ${g.target}` : ''}</span><span class="small muted cell__hint">${tier === 'solid' ? (list.length >= g.target ? 'solid ✓' : `max ${g.target}`) : ''}</span></header>
       <div style="padding:2px 10px 6px">${memberRows(list, { tapTier: true, groupId: g.id })}</div>
     </section>`;
-  const heldBadge = (g) => !g ? '' : g.this_week === 'held' ? '<span class="badge badge--present badge--nodot cl__held">Held LG</span>' : g.this_week === 'skip' ? '<span class="badge badge--absent badge--nodot cl__held">No LG</span>' : '<span class="badge badge--nodot cl__held">No report</span>';
-  const strip = (g) => `<div class="wk wk--sm" aria-label="Their Lifegroup, last ${g.calendar.length} weeks">${g.calendar.map((w) => { const m = w.meeting; return `<span class="wk__c ${!m ? 'wk__c--none' : m.held ? 'wk__c--held' : 'wk__c--skip'}" title="Week of ${weekLabel(w.week_start)}: ${!m ? 'no report' : m.held ? m.present + ' present' : 'no Lifegroup'}">${m && m.held ? m.present : m ? '×' : ''}</span>`; }).join('')}</div>`;
-  const recent = (g) => g.recent && g.recent.length ? `<ul class="cl__recent">${g.recent.map((m) => `<li><b>${fmtDate(m.meeting_date)}</b> — ${m.held ? `${m.present_count} present${m.present.length ? `: ${esc(m.present.join(', '))}` : ''}` : `no Lifegroup${m.no_meeting_reason ? ` (${esc(m.no_meeting_reason)})` : ''}`}</li>`).join('')}</ul>` : '<div class="small muted">No report yet from this leader.</div>';
-  const marks = (d.this_week && d.this_week.marks) || {};
-  const pa = (r) => {
-    if (typeof r.id !== 'number') return '';
-    const st = marks[r.id] || null;
-    return `<span class="pa" role="group" aria-label="${esc(r.name)} — this week">
-      <button type="button" class="btn btn--sm btn--present ${st === 'present' ? 'is-on' : ''}" data-mark="present" data-person="${r.id}" aria-pressed="${st === 'present'}">Present</button>
-      <button type="button" class="btn btn--sm btn--absent ${st === 'absent' ? 'is-on' : ''}" data-mark="absent" data-person="${r.id}" aria-pressed="${st === 'absent'}">Absent</button>
-    </span>`;
-  };
-  const item = (r) => `<div class="cl ${openLeaders.has(String(r.id)) ? 'is-open' : ''}" data-leader="${r.id}">
-      <div class="cl__sum" role="button" tabindex="0" aria-expanded="${openLeaders.has(String(r.id))}" data-toggle="${r.id}"><span class="cl__name">${esc(r.name)}</span>${heldBadge(r.group)}${r.last4 ? dots(r.last4) : '<span class="small muted">—</span>'}</div>
-      <div class="cl__pa">${pa(r)}<span class="small muted">${d.this_week && d.this_week.meeting_date ? `This week · ${fmtDate(d.this_week.meeting_date)}` : 'This week · not marked yet'}</span></div>
-      <div class="cl__detail" ${openLeaders.has(String(r.id)) ? '' : 'hidden'}>
-      ${r.group ? `<div style="padding:6px 12px 0">
-          <div class="small muted">${esc(r.group.name)} · ${r.group.total} member${r.group.total === 1 ? '' : 's'} · Closed cell ${r.group.solid} / ${r.group.target}${r.group.solid >= r.group.target ? ' (solid ✓)' : ''} · Open cell ${r.group.total - r.group.solid}</div>
-          <div class="row row--between mt-1" style="gap:8px;align-items:center"><span class="small"><b>Their Lifegroup</b> · ${r.group.held_last_4}/4 held</span>${strip(r.group)}</div>
-          <div class="small mt-1"><b>Who was present</b></div>${recent(r.group)}
+  const strip = (g) => `<div class="wk wk--sm" aria-label="Their Lifegroup, last ${g.calendar.length} weeks">${g.calendar.map((w) => { const m = w.meeting; return `<span class="wk__c ${!m ? 'wk__c--none' : m.held ? 'wk__c--held' : 'wk__c--skip'}" title="Week of ${weekLabel(w.week_start)}: ${!m ? 'no report' : m.held ? m.present_count + ' present' : 'no Lifegroup'}"></span>`; }).join('')}</div>`;
+  const recent = (g) => g.recent && g.recent.length ? `<ul class="cl__recent">${g.recent.map((m) => `<li><b>${fmtDate(m.meeting_date)}</b> — ${m.held ? `${m.present_count} present${m.present.length ? `: ${esc(m.present.join(', '))}` : ''}` : `no Lifegroup${m.no_meeting_reason ? ` (${esc(m.no_meeting_reason)})` : ''}`}</li>`).join('')}</ul>` : '<div class="small muted">No reports yet.</div>';
+
+  // ---- week toolbar + summary ----
+  const wk = mon ? `${fmtDate(mon.week_start)} – ${fmtDate(mon.week_end)}` : '';
+  const toolbar = `<section class="card reg-card mon-bar">
+      <div class="row row--between" style="gap:8px;flex-wrap:wrap;align-items:center">
+        <div><b>Week</b> <span class="small muted">${wk}${mon && mon.is_current_week ? ' · this week' : ''}</span></div>
+        <div class="mon-ctl">
+          <button type="button" class="btn btn--sm" id="monPrev" ${monBusy ? 'disabled' : ''} aria-label="Previous week">‹</button>
+          <input type="date" class="input input--sm" id="monDate" value="${mon ? mon.date : d.today}" max="${d.today}" aria-label="Pick any date in the week" ${monBusy ? 'disabled' : ''} />
+          <button type="button" class="btn btn--sm" id="monNext" ${monBusy || !mon || mon.is_current_week ? 'disabled' : ''} aria-label="Next week">›</button>
         </div>
-        <div class="cells" style="margin-top:8px;border-top:1px solid var(--border)">${cell(r.group, 'new', r.group.other_members)}${cell(r.group, 'solid', r.group.solid_members)}</div>`
-      : '<div class="small muted" style="padding:8px 12px 10px">No Lifegroup of their own yet.</div>'}
+      </div>
+      ${mon && mon.leaders.length > 1 ? `<div class="row mt-1" style="gap:8px;align-items:center"><label class="small muted" for="monFilter">Show</label><select class="select select--sm" id="monFilter"><option value="">All cell leaders</option>${mon.leaders.map((l) => `<option value="${l.id}" ${String(leaderFilter) === String(l.id) ? 'selected' : ''}>${esc(l.name)}</option>`).join('')}</select></div>` : ''}
+    </section>`;
+  const sm = mon && mon.summary;
+  const summary = sm ? `<div class="mon-sum" aria-label="Weekly summary">
+      <div class="card reg-card mon-sum__c"><span class="mon-sum__t">Cell leaders</span><b class="mon-sum__v">${sm.leaders.present}<small>/${sm.leaders.total} present</small></b><span class="small muted">${sm.leaders.absent} absent · ${sm.leaders.unrecorded} not yet recorded</span></div>
+      <div class="card reg-card mon-sum__c"><span class="mon-sum__t">Lifegroups</span><b class="mon-sum__v">${sm.lifegroups.conducted}<small>/${sm.lifegroups.total} conducted</small></b><span class="small muted">${sm.lifegroups.not_conducted} not conducted · ${sm.lifegroups.not_reported} not yet reported</span></div>
+      <div class="card reg-card mon-sum__c"><span class="mon-sum__t">Reports</span><b class="mon-sum__v">${sm.reports.submitted}<small>/${sm.lifegroups.total} submitted</small></b><span class="small muted">${sm.reports.pending} pending</span></div>
+      <div class="card reg-card mon-sum__c"><span class="mon-sum__t">Members</span><b class="mon-sum__v">${sm.members.present}<small>/${sm.members.registered} present</small></b><span class="small muted">${sm.members.absent} absent · ${sm.members.unrecorded} not yet recorded · ${sm.members.sessions} session${sm.members.sessions === 1 ? '' : 's'}</span></div>
+    </div>` : '';
+
+  // ---- one card per cell leader ----
+  const item = (r) => {
+    const g = r.group ? byGroupId.get(r.group.id) : null; // existing 4-week view (strip, recent, Open/Closed cell)
+    const open = openLeaders.has(String(r.id));
+    const rep = r.report;
+    const repLine = rep.status === 'yes' ? `<span class="badge badge--present badge--nodot">Conducted · ${fmtDate(rep.meeting_date)}</span>`
+      : rep.status === 'no' ? `<span class="badge badge--absent badge--nodot">Not conducted</span>${rep.reason ? ` <span class="small muted">· ${esc(rep.reason)}</span>` : ''}`
+      : '<span class="badge badge--nodot">Not yet reported</span>';
+    const members = rep.status === 'yes' ? `<div class="mon-members">
+        <div class="row row--between" style="gap:8px;flex-wrap:wrap;align-items:baseline">
+          <div><b>Member attendance</b> <span class="small muted">· ${esc(r.group.name)} · ${fmtDate(rep.meeting_date)}</span></div>
+          <div class="small"><b class="ok">${r.totals.present} present</b> · <b class="no">${r.totals.absent} absent</b> · ${r.totals.unrecorded} not yet · ${r.totals.registered} registered</div>
+        </div>
+        ${r.members.length ? `<div class="mon-mlist">${r.members.map((m) => `<div class="mon-m"><span class="mon-m__name">${esc(m.name)} <span class="small muted">${m.tier === 'solid' ? 'Closed cell' : 'Open cell'}</span></span>${tri('member', m.status, { labels: ['Present', 'Absent', 'Not yet'], person: m.id, group: r.group.id, title: `${m.name} — Lifegroup attendance` })}</div>`).join('')}</div>`
+          : '<div class="small muted" style="padding:6px 0">No members assigned to this Lifegroup yet.</div>'}
+      </div>` : '';
+    return `<div class="cl ${open ? 'is-open' : ''}" data-leader="${r.id}">
+      <div class="cl__sum" role="button" tabindex="0" aria-expanded="${open}" data-toggle="${r.id}"><span class="cl__name">${esc(r.name)}${r.in_leader_group ? '' : ' <span class="small muted">(not in your Lifegroup)</span>'}</span>${g && g.last4 ? '' : ''}</div>
+      <div class="mon-rows">
+        <div class="mon-row"><span class="mon-row__l">Network meeting</span>${r.in_leader_group ? tri('leader', r.attendance, { labels: ['Present', 'Absent', 'Not yet'], person: r.id, title: `${r.name} — network meeting attendance` }) : '<span class="small muted">—</span>'}</div>
+        <div class="mon-row"><span class="mon-row__l">Conducted Lifegroup this week?</span>${r.group ? tri('report', rep.status === 'yes' ? 'present' : rep.status === 'no' ? 'absent' : null, { labels: ['Yes', 'No', 'Not yet'], group: r.group.id, title: `${r.name} — did they conduct Lifegroup?` }) : '<span class="small muted">No Lifegroup of their own yet</span>'}</div>
+        ${r.group ? `<div class="mon-row mon-row--status"><span class="mon-row__l"></span><span>${repLine}</span></div>` : ''}
+        ${members}
+      </div>
+      <div class="cl__detail" ${open ? '' : 'hidden'}>
+        ${g ? `<div style="padding:6px 12px 0">
+          <div class="small muted">${esc(g.name)} · ${g.total} member${g.total === 1 ? '' : 's'} · Closed cell ${g.solid} / ${g.target}${g.solid >= g.target ? ' (solid ✓)' : ''} · Open cell ${g.total - g.solid}</div>
+          <div class="row row--between mt-1" style="gap:8px;align-items:center"><span class="small"><b>Their Lifegroup</b> · ${g.held_last_4}/4 held</span>${strip(g)}</div>
+          <div class="small mt-1"><b>Recent reports</b></div>${recent(g)}
+        </div>
+        <div class="cells" style="margin-top:8px;border-top:1px solid var(--border)">${cell(g, 'new', g.other_members)}${cell(g, 'solid', g.solid_members)}</div>`
+        : '<div class="small muted" style="padding:8px 12px 10px">No Lifegroup of their own yet.</div>'}
       </div>
     </div>`;
-  return `
-    <section class="card reg-card" style="padding:0;overflow:hidden">
-      <div class="row row--between" style="padding:14px 16px 4px"><b>My cell leaders</b><span class="small muted">${rows.length}${d.max_members ? ` / ${d.max_members}` : ''} · ${net.summary.met_this_week}/${net.summary.groups} met this week</span></div>
-      <p class="small muted" style="padding:0 16px 10px;margin:0">Tap <b>Present</b> or <b>Absent</b> for this week's Lifegroup — it is saved right away and can be changed. Open a name to see their own members and move them between Open cell and Closed cell.</p>
-      ${rows.length ? rows.map(item).join('') : '<p class="small muted" style="padding:0 16px 14px">No cell leaders yet.</p>'}
+  };
+  const leaders = mon ? mon.leaders.filter((l) => !leaderFilter || String(l.id) === String(leaderFilter)) : [];
+  const list = monErr ? `<div class="alert alert--error" style="margin:12px 16px">${esc(monErr)}</div>`
+    : !mon ? '<div class="loading" style="padding:20px 16px">Loading this week…</div>'
+    : leaders.length ? leaders.map(item).join('') : '<p class="small muted" style="padding:0 16px 14px">No cell leaders yet.</p>';
+  return `${toolbar}${summary}
+    <section class="card reg-card ${monBusy ? 'is-busy' : ''}" style="padding:0;overflow:hidden" aria-busy="${monBusy}">
+      <div class="row row--between" style="padding:14px 16px 4px"><b>My cell leaders</b><span class="small muted">${d.members.length}${d.max_members ? ` / ${d.max_members}` : ''} · ${net.summary.met_this_week}/${net.summary.groups} met this week</span></div>
+      <p class="small muted" style="padding:0 16px 10px;margin:0">Three separate records per leader: <b>Network meeting</b> (were they present?), <b>Conducted Lifegroup?</b> (their own report), and the <b>member attendance</b> of that session. One never fills in another. Open a name for their Open / Closed cell.</p>
+      ${list}
     </section>`;
 }
 
@@ -201,18 +259,33 @@ function bindTier() {
     const go = () => { const id = h.dataset.toggle; const row = h.closest('.cl'); const open = !openLeaders.has(id); if (open) openLeaders.add(id); else openLeaders.delete(id); row.classList.toggle('is-open', open); row.querySelector('.cl__detail').hidden = !open; h.setAttribute('aria-expanded', String(open)); };
     h.onclick = go; h.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } };
   });
-  body.querySelectorAll('[data-mark]').forEach((b) => {
+  body.querySelectorAll('[data-tri]').forEach((b) => {
     b.onclick = async (e) => {
       e.preventDefault(); e.stopPropagation();
-      const wrap = b.closest('.pa'); wrap.querySelectorAll('button').forEach((x) => { x.disabled = true; });
+      const grp = b.closest('.tri'); if (grp.classList.contains('is-busy')) return;
+      const status = b.dataset.tri, kind = b.dataset.kind, date = mon ? mon.date : d.today;
+      let reason;
+      if (kind === 'report' && status === 'absent') { reason = window.prompt('Why was there no Lifegroup this week? (optional)', ''); if (reason === null) return; }
+      grp.classList.add('is-busy'); grp.querySelectorAll('button').forEach((x) => { x.disabled = true; });
+      const base = `/api/public/lifegroup/${encodeURIComponent(token)}`;
       try {
-        const r = await call('POST', `/api/public/lifegroup/${encodeURIComponent(token)}/attendance`, { person_id: Number(b.dataset.person), status: b.dataset.mark });
-        d.this_week = r.this_week; if (r.recent) d.recent = r.recent;
-        toast(r.status === 'present' ? 'Marked present.' : 'Marked absent.', r.status === 'present' ? 'success' : 'info');
+        let r;
+        if (kind === 'leader') r = await call('POST', `${base}/attendance`, { person_id: Number(b.dataset.person), status, date });
+        else if (kind === 'report') r = await call('POST', `${base}/groups/${b.dataset.group}/conducted`, { conducted: status === 'present' ? 'yes' : status === 'absent' ? 'no' : 'clear', date, reason: reason || undefined });
+        else r = await call('POST', `${base}/groups/${b.dataset.group}/attendance`, { person_id: Number(b.dataset.person), status, date });
+        if (r.monitor) mon = r.monitor;
+        if (kind === 'leader') { if (r.this_week) d.this_week = r.this_week; if (r.recent) d.recent = r.recent; toast(status === 'present' ? 'Marked present.' : status === 'absent' ? 'Marked absent.' : 'Cleared — not yet recorded.', status === 'absent' ? 'info' : 'success'); }
+        else if (kind === 'report') toast(r.conducted === 'yes' ? 'Saved: conducted Lifegroup. You can now record the members.' : r.conducted === 'no' ? 'Saved: no Lifegroup this week.' : 'Report cleared — not yet reported.', r.conducted ? 'success' : 'info');
+        else toast(r.status === 'present' ? 'Member marked present.' : r.status === 'absent' ? 'Member marked absent.' : 'Cleared — not yet recorded.', r.status === 'absent' ? 'info' : 'success');
         render();
-      } catch (ex) { toast(ex.message, 'error'); wrap.querySelectorAll('button').forEach((x) => { x.disabled = false; }); if (ex.status === 404) setTimeout(load, 1500); }
+      } catch (ex) { toast(ex.message, 'error'); grp.classList.remove('is-busy'); grp.querySelectorAll('button').forEach((x) => { x.disabled = false; }); if (ex.status === 404) setTimeout(load, 1500); }
     };
   });
+  const dateEl = body.querySelector('#monDate');
+  if (dateEl) dateEl.onchange = () => { if (dateEl.value) loadMonitor(dateEl.value); };
+  const prev = body.querySelector('#monPrev'); if (prev) prev.onclick = () => loadMonitor(addDaysISO(mon ? mon.date : d.today, -7));
+  const next = body.querySelector('#monNext'); if (next) next.onclick = () => loadMonitor(addDaysISO(mon ? mon.date : d.today, 7));
+  const flt = body.querySelector('#monFilter'); if (flt) flt.onchange = () => { leaderFilter = flt.value; render(); };
   body.querySelectorAll('[data-tier]').forEach((b) => {
     b.onclick = async () => {
       b.disabled = true;
@@ -257,7 +330,7 @@ function renderError(e) {
 
 async function load() {
   if (!token) { renderError({ status: 404, message: 'Open the link exactly as the Lifegen admin sent it (it ends with ?t=…).' }); return; }
-  try { d = await call('GET', `/api/public/lifegroup/${encodeURIComponent(token)}`); render(); }
+  try { d = await call('GET', `/api/public/lifegroup/${encodeURIComponent(token)}`); render(); if (d.network && !mon && !monBusy) loadMonitor(mon ? mon.date : null); }
   catch (e) { renderError(e); }
 }
 load();
